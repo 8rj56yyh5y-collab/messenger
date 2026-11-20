@@ -1,0 +1,13 @@
+{
+  "name": "Gobsek Chat",
+  "short_name": "Gobsek Chat",
+  "description": "Корпоративний месенджер: чати, канали, дзвінки й відеоконференції",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f1115",
+  "theme_color": "#3390ec",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
