@@ -207,6 +207,10 @@ test('группа: участники, упоминания, опрос, рол
   await ivan.patch(`/api/chats/${groupId}/members/${olenaId}`, { role: 'admin' });
   assert.equal((await olena.patch(`/api/chats/${groupId}`, { title: 'Бухгалтерія ТОВ' })).status, 200);
 
+  // Аватар чата — только своя картинка (чужой файл не «опубликовать» через аватар)
+  const secret = await ivan.req('POST', '/api/files', Buffer.from('secret'), { 'content-type': 'image/png', 'x-file-name': 's.png' });
+  assert.equal((await olena.patch(`/api/chats/${groupId}`, { avatar_file: secret.data.id })).status, 400);
+
   // Канал: участник не пишет
   const news = (await ivan.get('/api/chats')).data.chats.find((x) => x.type === 'channel');
   const w = await ivan.post(`/api/chats/${news.id}/messages`, { body: 'Можна?' });

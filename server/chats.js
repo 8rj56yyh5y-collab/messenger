@@ -508,6 +508,13 @@ function clearHistoryForMe(uid, chatId) {
 }
 
 // ---------- Группы и каналы ----------
+/** Аватар чата — только своя картинка: иначе чужой файл по номеру стал бы виден всем. */
+function ownImage(fileId, uid) {
+  if (!fileId) return null;
+  const f = db.prepare('SELECT user_id, mime FROM files WHERE id = ?').get(int(fileId));
+  if (!f || f.user_id !== uid || !/^image\//.test(f.mime)) throw new HttpError(400, 'Нужна своя картинка');
+  return int(fileId);
+}
 function notifyChatUpdate(chatId) {
   const chat = db.prepare('SELECT * FROM chats WHERE id = ?').get(chatId);
   for (const id of memberIds(chatId)) rt.toUser(id, { type: 'chat:update', chat: serializeChat(chat, id) });
@@ -530,7 +537,7 @@ function createChat(uid, b) {
       const u = userById(m);
       if (u && u.active && !u.is_bot) ins.run(cid, m, now);
     }
-    if (b.avatar_file) db.prepare('UPDATE chats SET avatar_file = ? WHERE id = ?').run(int(b.avatar_file), cid);
+    if (b.avatar_file) db.prepare('UPDATE chats SET avatar_file = ? WHERE id = ?').run(ownImage(b.avatar_file, uid), cid);
     return cid;
   });
   systemMessage(id, uid, 'created', { title });
@@ -554,7 +561,7 @@ function updateChat(uid, chatId, b) {
   if ('description' in b) { sets.push('description = ?'); vals.push(str(b.description, 500)); }
   if ('is_public' in b) { sets.push('is_public = ?'); vals.push(b.is_public ? 1 : 0); }
   if ('only_admins_post' in b && chat.type === 'group') { sets.push('only_admins_post = ?'); vals.push(b.only_admins_post ? 1 : 0); }
-  if ('avatar_file' in b) { sets.push('avatar_file = ?'); vals.push(b.avatar_file ? int(b.avatar_file) : null); }
+  if ('avatar_file' in b) { sets.push('avatar_file = ?'); vals.push(b.avatar_file ? ownImage(b.avatar_file, uid) : null); }
   if (b.reset_invite) { sets.push('invite_code = ?'); vals.push(crypto.randomBytes(9).toString('base64url')); }
   if (sets.length) db.prepare(`UPDATE chats SET ${sets.join(', ')} WHERE id = ?`).run(...vals, chat.id);
   if ('title' in b && str(b.title, 80) !== chat.title) systemMessage(chat.id, uid, 'title', { title: str(b.title, 80) });
