@@ -417,8 +417,17 @@ body:not([data-section="chats"]).panel-open .layout { grid-template-columns: var
   body:not([data-section="chats"]) .main { transform: none; padding-bottom: calc(62px + env(safe-area-inset-bottom)); }
   .page-inner { padding: 16px 14px 30px; }
   .page-head .only-mobile { display: none !important; }
-  .stat-strip { grid-template-columns: repeat(2, 1fr); }
-  .stat:last-child { grid-column: span 2; }
+  .page-head { flex-wrap: wrap; }
+  .page-head > div { flex: 1 1 100%; }
+  .page-head h1 { font-size: 1.45rem; }
+  .page-head .grow { display: none; }
+  .stat-strip { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .stat { padding: 10px 12px; border-radius: 14px; }
+  .stat b { font-size: 1.4rem; }
+  .stat span { font-size: .74em; line-height: 1.2; display: block; }
+  .att-item { flex-wrap: wrap; }
+  .att-item .att-main { flex: 1 1 calc(100% - 60px); }
+  .pcard { padding: 14px; }
   .pulse-grid { grid-template-columns: 1fr; }
   .kanban { grid-template-columns: repeat(4, 82vw); scroll-snap-type: x mandatory; }
   .kcol { scroll-snap-align: start; }
