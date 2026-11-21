@@ -1,6 +1,6 @@
 // Service worker: оболочка приложения доступна без сети, API — всегда из сети.
-const CACHE = 'gc-shell-v1';
-const SHELL = ['/', '/index.html', '/css/app.css', '/icon.svg', '/manifest.webmanifest', '/js/theme-boot.js'];
+const CACHE = 'gc-shell-v2';
+const SHELL = ['/', '/index.html', '/css/app.css', '/css/design2.css', '/icon.svg', '/manifest.webmanifest', '/js/theme-boot.js'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

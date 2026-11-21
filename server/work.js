@@ -23,6 +23,17 @@ function targetChat(uid, chatId, otherId) {
   return chats.ensureSaved(uid);
 }
 
+/** Название чата с точки зрения пользователя: для личного — имя собеседника. */
+function chatLabel(c, uid) {
+  if (!c) return null;
+  let title = c.title;
+  if (c.type === 'direct') {
+    const other = chats.userById(String(c.direct_key).split(':').map(Number).find((x) => x !== uid));
+    title = other ? other.name : '';
+  }
+  return { id: c.id, type: c.type, title };
+}
+
 function refreshCard(messageId) {
   const m = messageId && chats.messageRow(messageId);
   if (!m || m.deleted) return;
@@ -105,7 +116,7 @@ function listTasks(uid, scope = 'mine') {
   return rows.map((t) => {
     const v = chats.taskView(t);
     const c = t.chat_id ? db.prepare('SELECT id, type, title, direct_key FROM chats WHERE id = ?').get(t.chat_id) : null;
-    if (c) v.chat = { id: c.id, type: c.type, title: c.title };
+    if (c) v.chat = chatLabel(c, uid);
     return v;
   });
 }
@@ -238,7 +249,7 @@ function listMeetings(uid, from, to) {
     WHERE m.starts_at BETWEEN ? AND ? ORDER BY m.starts_at LIMIT 300`).all(uid, a, b).map((mt) => {
     const v = chats.meetingView(mt, uid);
     const c = db.prepare('SELECT * FROM chats WHERE id = ?').get(mt.chat_id);
-    if (c) v.chat = { id: c.id, type: c.type, title: c.title };
+    if (c) v.chat = chatLabel(c, uid);
     return v;
   });
 }

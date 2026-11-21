@@ -13,6 +13,7 @@ import { previewText } from './messages.js';
 import { openSettings, applyTheme, applyAppearance } from './settings.js';
 import { openAdmin } from './admin.js';
 import { openHelp } from './help.js';
+import { showPage, hidePage, currentPage } from './pages.js';
 
 let sock = null;
 export const socket = () => sock;
@@ -131,11 +132,13 @@ async function start(user) {
   applyTheme();
   applyAppearance();
   $('#app').innerHTML = `<div class="layout">
+    <nav id="rail" class="rail">${railHtml()}</nav>
     <aside id="sidebar" class="sidebar">${sidebarHtml()}</aside>
     <main id="main" class="main">${emptyHtml()}</main>
     <aside id="panel" class="panel"></aside></div>
     <div id="drawer" class="drawer"></div>`;
   bindSidebar();
+  $('#rail').addEventListener('click', onRailClick);
   const [data, users] = await Promise.all([get('/api/chats'), get('/api/users')]);
   users.forEach(upsertUser);
   data.chats.forEach(upsertChat);
@@ -147,6 +150,7 @@ async function start(user) {
   sock.connect();
   window.addEventListener('hashchange', route);
   route();
+  refreshBadges();
   if (user.must_change_pw) setTimeout(() => openSettings('security', { forced: true }), 400);
 }
 
@@ -169,10 +173,26 @@ export function navigate(hash) {
   if (location.hash === `#${hash}` || (!hash && !location.hash)) { route(); return; }
   location.hash = hash;
 }
+const SECTIONS = ['pulse', 'tasks', 'calendar', 'calls', 'people'];
+function setSection(name) {
+  S.section = name;
+  document.body.dataset.section = name;
+  $$('#rail [data-nav]').forEach((b) => b.classList.toggle('on', b.dataset.nav === name));
+}
 function route() {
   const h = location.hash;
   const join = hashParam('join');
   if (join) { history.replaceState(null, '', '#'); joinByCode(join); return; }
+  const sec = /^#\/(pulse|tasks|calendar|calls|people)$/.exec(h);
+  if (sec && SECTIONS.includes(sec[1])) {
+    if (S.current) closeChat();
+    closePanel();
+    setSection(sec[1]);
+    showPage(sec[1]);
+    return;
+  }
+  if (currentPage()) { hidePage(); if (!/^#\/chat\//.test(h)) $('#main').innerHTML = emptyHtml(); }
+  setSection('chats');
   const m = /^#\/chat\/(\d+)/.exec(h);
   if (m) {
     const id = Number(m[1]);
@@ -182,6 +202,63 @@ function route() {
   }
   if (S.current) closeChat();
 }
+
+// ---------- Навигационная рельса ----------
+const RAIL = [
+  ['chats', 'chat', 'nav.chats'], ['pulse', 'activity', 'nav.pulse'], ['tasks', 'kanban', 'nav.tasks'],
+  ['calendar', 'calendar', 'nav.calendar'], ['calls', 'phone', 'nav.calls'], ['people', 'users', 'nav.people'],
+];
+function railHtml() {
+  return `<button class="rail-logo" data-rail="drawer" title="${esc(S.meta.name)}">${icon('send', 22)}</button>
+    <div class="rail-items">${RAIL.map(([k, ic, label]) => `<button class="rail-item" data-nav="${k}" title="${esc(t(label))}">${icon(ic, 22)}<span>${esc(t(label))}</span><i class="rail-badge hidden" data-badge="${k}"></i></button>`).join('')}</div>
+    <span class="grow"></span>
+    <button class="rail-item rail-extra" data-rail="ai" title="Gobsek AI">${icon('sparkles', 22)}<span>AI</span></button>
+    <button class="rail-item rail-extra" data-rail="settings" title="${esc(t('side.settings'))}">${icon('settings', 22)}<span>${esc(t('nav.settings'))}</span></button>
+    <button class="rail-me" data-rail="drawer">${avatar(S.me, 40)}<i class="st-dot st-${S.me.status || 'available'}"></i></button>`;
+}
+function onRailClick(e) {
+  const nav = e.target.closest('[data-nav]');
+  if (nav) {
+    const k = nav.dataset.nav;
+    if (k === 'chats') navigate(S.lastChat && S.chats.has(S.lastChat) && !isMobile() ? `/chat/${S.lastChat}` : '');
+    else navigate(`/${k}`);
+    return;
+  }
+  const r = e.target.closest('[data-rail]');
+  if (!r) return;
+  if (r.dataset.rail === 'drawer') openDrawer();
+  if (r.dataset.rail === 'ai') openAi();
+  if (r.dataset.rail === 'settings') openSettings();
+}
+export function setRailBadges(map) {
+  for (const [k, n] of Object.entries(map)) {
+    const b = $(`#rail [data-badge="${k}"]`);
+    if (!b) continue;
+    b.textContent = n > 99 ? '99+' : String(n || '');
+    b.classList.toggle('hidden', !n);
+  }
+}
+function unreadChats() {
+  let unread = 0;
+  for (const c of S.chats.values()) if ((c.unread || c.manual_unread) && !isMuted(c) && !c.archived) unread += 1;
+  return unread;
+}
+let badgeTimer = null;
+export function refreshBadges() {
+  clearTimeout(badgeTimer);
+  badgeTimer = setTimeout(async () => {
+    setRailBadges({ chats: unreadChats() });
+    try {
+      const [tasks, appr, acks] = await Promise.all([get('/api/tasks?scope=mine'), get('/api/approvals/pending'), get('/api/acks/pending')]);
+      setRailBadges({ tasks: tasks.filter((x) => !['done', 'cancelled'].includes(x.status)).length, pulse: appr.length + acks.length });
+    } catch { /* офлайн */ }
+  }, 300);
+}
+on('chats:changed', () => setRailBadges({ chats: unreadChats() }));
+on('tasks:changed', refreshBadges);
+on('acks:changed', refreshBadges);
+on('chat:opened', (id) => { if (id) S.lastChat = id; });
+export function openAdminInvites() { openAdmin('invites'); }
 let jump = null;
 function pendingJump(id) {
   if (jump && jump.chatId === id) { const j = jump; jump = null; return { jumpTo: j.jumpTo }; }
@@ -245,6 +322,12 @@ function onWs(msg) {
       break;
     case 'message:new': {
       const m = msg.message;
+      if (['approval', 'task'].includes(m.kind) || m.meta?.ack_required) refreshBadges();
+      if (m.thread_id) {
+        // Ответ в ветке: уведомляем, только если упомянули меня
+        if (m.user_id !== S.me.id && m.meta?.mentions?.includes(S.me.id)) notify(S.chats.get(m.chat_id), m, false);
+        break;
+      }
       const c = S.chats.get(m.chat_id);
       if (!c) { reloadChat(m.chat_id); break; }
       const mine = m.user_id === S.me.id;
@@ -314,6 +397,23 @@ function onWs(msg) {
       emit('user:updated', msg.user.id);
       break;
     case 'reminder':
+      break;
+    case 'task:update':
+      if (msg.actor !== S.me.id) {
+        const tk = msg.task;
+        toast(t(msg.what === 'created' ? 'task.notify_new' : msg.what === 'status:done' ? 'task.notify_done' : 'task.notify_upd', { title: tk.title, name: userName(msg.actor) }),
+          { action: () => navigate('/tasks'), actionLabel: t('common.open'), timeout: 6000 });
+        if (msg.what === 'created') ping();
+      }
+      refreshBadges();
+      break;
+    case 'approval:done':
+      toast(t(msg.status === 'approved' ? 'appr.notify_ok' : 'appr.notify_no', { title: msg.title }), { type: msg.status === 'approved' ? '' : 'error', action: () => openChatById(msg.chat_id, { jumpTo: msg.message_id }), actionLabel: t('common.open'), timeout: 8000 });
+      refreshBadges();
+      break;
+    case 'meeting:soon':
+      toast(t('meet.soon', { title: msg.meeting.title }), { action: () => { openChatById(msg.meeting.chat_id); startCall(msg.meeting.chat_id, 'video'); }, actionLabel: t('call.join'), timeout: 15000 });
+      ping();
       break;
     default:
       if (msg.type.startsWith('call:') || msg.type === 'rtc:signal') {
@@ -437,6 +537,9 @@ export function openDrawer() {
       <nav class="drawer-nav">
         <button data-da="saved">${icon('bookmark')}<span>${esc(t('chat.saved'))}</span></button>
         <button data-da="ai">${icon('sparkles')}<span>Gobsek AI</span>${S.meta.ai ? '' : `<small>${esc(t('ai.off_short'))}</small>`}</button>
+        <button data-da="pulse">${icon('activity')}<span>${esc(t('nav.pulse'))}</span></button>
+        <button data-da="tasks">${icon('kanban')}<span>${esc(t('nav.tasks'))}</span></button>
+        <button data-da="calendar">${icon('calendar')}<span>${esc(t('nav.calendar'))}</span></button>
         <button data-da="contacts">${icon('contacts')}<span>${esc(t('side.contacts'))}</span></button>
         <button data-da="calls">${icon('phone')}<span>${esc(t('side.calls'))}</span></button>
         <button data-da="group">${icon('users')}<span>${esc(t('side.new_group'))}</span></button>
@@ -477,7 +580,10 @@ export function openDrawer() {
       case 'saved': openDirect(S.me.id); break;
       case 'ai': openAi(); break;
       case 'contacts': openContacts(); break;
-      case 'calls': openCalls(); break;
+      case 'calls': navigate('/calls'); break;
+      case 'pulse': navigate('/pulse'); break;
+      case 'tasks': navigate('/tasks'); break;
+      case 'calendar': navigate('/calendar'); break;
       case 'group': newChatDialog('group'); break;
       case 'channel': newChatDialog('channel'); break;
       case 'catalog': openCatalog(); break;

@@ -8,6 +8,7 @@ const { db } = require('./db');
 const auth = require('./auth');
 const chats = require('./chats');
 const extras = require('./extras');
+const work = require('./work');
 
 const PASSWORD = process.env.DEMO_PASSWORD || 'demo1234';
 const fake = { headers: {}, socket: {} };
@@ -83,6 +84,47 @@ function seed() {
   say(ids.serhii, dm2.id, 'Екструдер на лінії 2 знову зупинився, викликав сервіс.');
   say(admin.id, dm2.id, 'Тримай в курсі. Якщо до вечора не запустять — переводимо замовлення на лінію 1.');
   say(ids.serhii, dm2.id, 'Зрозумів 👌');
+
+  // ----- Рабочие инструменты: задачи, погодження, подяки, встречи, ознакомление, ветки, дни рождения -----
+  const day = 86400e3;
+  const mmdd = (offset) => { const d = new Date(Date.now() + offset * day); return `1990-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  db.prepare('UPDATE users SET birthday = ? WHERE id = ?').run(mmdd(0), ids.natalia);
+  db.prepare('UPDATE users SET birthday = ? WHERE id = ?').run(mmdd(3), ids.dmytro);
+  db.prepare('UPDATE users SET birthday = ? WHERE id = ?').run('1988-03-14', admin.id);
+  db.prepare('UPDATE users SET created_at = ? WHERE id IN (?, ?)').run(Date.now() - 3 * day, ids.yulia, ids.andrii);
+
+  work.createTask(ids.olena, { chat_id: fin.id, title: 'Звірити сальдо з 1С за жовтень', description: 'ОТП, ПУМБ, Ощад — розбіжності скинути в гілку', assignee_id: ids.ivan, due_at: Date.now() + 5 * 3600e3, priority: 'high' });
+  const t2 = work.createTask(admin.id, { chat_id: fin.id, title: 'Підготувати бюджет ЦФО «Виробництво» на грудень', assignee_id: ids.olena, due_at: Date.now() + 2 * day, priority: 'normal' });
+  work.createTask(admin.id, { title: 'Погодити договір з «Металтрейд»', assignee_id: admin.id, due_at: Date.now() - 2 * 3600e3, priority: 'urgent' });
+  work.createTask(ids.dmytro, { chat_id: sales.id, title: 'Виставити рахунок «Металтрейд» на 40 т', assignee_id: ids.anna, due_at: Date.now() + day, priority: 'high' });
+  work.createTask(ids.serhii, { title: 'Замовити ножі для дробарки', assignee_id: admin.id, due_at: Date.now() + 4 * day, priority: 'low' });
+  const t6 = work.createTask(admin.id, { chat_id: sales.id, title: 'Звіт по відвантаженнях за тиждень', assignee_id: ids.dmytro, priority: 'normal' });
+  work.updateTask(ids.olena, t2.id, { status: 'doing' });
+  work.updateTask(ids.dmytro, t6.id, { status: 'review' });
+  const t7 = work.createTask(admin.id, { title: 'Оновити регламент інкасації', assignee_id: admin.id, priority: 'normal' });
+  work.updateTask(admin.id, t7.id, { status: 'done' });
+
+  work.createApproval(ids.olena, fin.id, { title: 'Оплата оренди складу за грудень', amount: 45000, currency: 'UAH', description: 'ТОВ «Логістик-Парк», договір №14/2026, ЦФО «Склад»', approvers: [admin.id, ids.ivan] });
+  const ap2 = work.createApproval(ids.dmytro, sales.id, { title: 'Знижка 3% для «Металтрейд»', amount: 18600, description: 'Обсяг 40 т, постійний клієнт', approvers: [admin.id] });
+  work.decide(admin.id, ap2.id, { decision: 'approve', comment: 'Ок, але тільки на цю партію' });
+
+  work.giveKudos(ids.olena, general, { to: [ids.ivan, ids.maria], badge: 'speed', text: 'Дякую, що закрили місяць на 2 дні раніше! 🚀' });
+  work.giveKudos(ids.dmytro, general, { to: [ids.andrii], badge: 'help', text: 'Андрію, дякую за машини у пʼятницю ввечері' });
+  work.giveKudos(admin.id, general, { to: [ids.serhii], badge: 'quality', text: 'Лінія 2 знову працює — без браку. Респект цеху!' });
+
+  const soon = new Date(Date.now() + 40 * 60e3); soon.setMinutes(soon.getMinutes() < 30 ? 30 : 0, 0, 0); if (soon < Date.now() + 15 * 60e3) soon.setTime(soon.getTime() + 30 * 60e3);
+  work.createMeeting(admin.id, fin.id, { title: 'Бюджет на грудень', starts_at: soon.getTime(), duration_min: 45, description: '1. Підсумки жовтня\n2. Ліміти ЦФО\n3. Платіжний календар' });
+  const tmr = new Date(Date.now() + day); tmr.setHours(10, 0, 0, 0);
+  work.createMeeting(ids.dmytro, sales.id, { title: 'Планірка відділу продажів', starts_at: tmr.getTime(), duration_min: 30 });
+  const fri = new Date(Date.now() + 2 * day); fri.setHours(15, 0, 0, 0);
+  work.createMeeting(admin.id, general, { title: 'Загальні збори компанії', starts_at: fri.getTime(), duration_min: 60 });
+
+  const reg = chats.sendMessage(admin.id, news, { body: '📌 **Новий регламент платежів** з 1 грудня: заявки на оплату — лише через Gobsek, до 12:00 дня оплати. Прохання ознайомитися.', ack_required: true });
+  chats.ack(ids.olena, reg.id);
+  chats.ack(ids.ivan, reg.id);
+  const root = chats.sendMessage(ids.ivan, fin.id, { body: 'Колеги, по виписці ПУМБ є платіж 12 400 ₴ без призначення. Хто знає, що це?' });
+  chats.sendMessage(ids.maria, fin.id, { body: 'Це повернення від «Вторметресурс», акт у мене', thread_id: root.id });
+  chats.sendMessage(ids.olena, fin.id, { body: 'Дякую, Маріє! Ivan, проведи як повернення.', thread_id: root.id });
 
   // Прочитано всё, кроме пары последних — чтобы были непрочитанные.
   db.prepare('UPDATE chat_members SET last_read_id = (SELECT COALESCE(MAX(id), 0) FROM messages WHERE chat_id = chat_members.chat_id)').run();

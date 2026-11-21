@@ -11,11 +11,14 @@ import * as app from './app.js';
 const FOLDERS = ['all', 'unread', 'personal', 'groups', 'channels'];
 
 export function sidebarHtml() {
-  return `<div class="side-head">
-      <button class="icon-btn ghost" data-sa="drawer" aria-label="menu">${icon('menu')}</button>
-      <div class="search-box">${icon('search', 18)}<input id="side-search" placeholder="${esc(t('common.search'))}" autocomplete="off"><button class="icon-btn ghost xs hidden" data-sa="search-clear">${icon('x', 16)}</button></div>
+  return `<div class="side-top">
+      <button class="icon-btn ghost only-mobile" data-sa="drawer" aria-label="menu">${icon('menu')}</button>
+      <h2>${esc(t('nav.chats'))}</h2><span class="grow"></span>
+      <button class="icon-btn ghost" data-sa="new" title="${esc(t('side.new'))}">${icon('edit', 20)}</button>
     </div>
+    <div class="side-head"><div class="search-box">${icon('search', 18)}<input id="side-search" placeholder="${esc(t('common.search'))}" autocomplete="off"><kbd class="kbd-hint">Ctrl K</kbd><button class="icon-btn ghost xs hidden" data-sa="search-clear">${icon('x', 16)}</button></div></div>
     <div class="conn-state hidden"></div>
+    <div class="stories"></div>
     <div class="folders" role="tablist"></div>
     <div class="side-body"><div class="chat-list" role="list"></div><div class="search-results hidden"></div></div>
     <button class="fab" data-sa="new" aria-label="${esc(t('side.new'))}">${icon('edit', 22)}</button>`;
@@ -126,9 +129,18 @@ function rowHtml(c) {
     </div></div>`;
 }
 
+function renderStories() {
+  const el = $('#sidebar .stories');
+  if (!el) return;
+  const people = [...S.online].map((id) => S.users.get(id)).filter((u) => u && u.id !== S.me.id && !u.is_bot).slice(0, 20);
+  el.classList.toggle('hidden', !people.length || S.folder !== 'all');
+  el.innerHTML = people.map((u) => `<button class="story" data-user="${u.id}" title="${esc(u.name)}">${avatar(u, 48, { online: true })}<span>${esc(u.name.split(' ')[0])}</span></button>`).join('');
+}
+
 export function renderList() {
   const el = $('#sidebar .chat-list');
   if (!el) return;
+  renderStories();
   const list = sortChats([...S.chats.values()].filter(inFolder));
   if (!list.length) {
     el.innerHTML = `<div class="side-empty">${icon(S.folder === 'unread' ? 'check2' : 'users', 34)}<p>${esc(S.folder === 'unread' ? t('side.all_read') : t('side.no_chats'))}</p>

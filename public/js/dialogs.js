@@ -36,7 +36,8 @@ export function modal({ title = '', content = '', cls = '', onMount, onClose, wi
   stack.push(api);
   if (onMount) onMount(api.body, api);
   const first = wrap.querySelector('[autofocus]');
-  if (first) setTimeout(() => first.focus(), 50);
+  // Фокус на первое поле — только если пользователь ещё никуда не перешёл сам
+  if (first) setTimeout(() => { if (!wrap.contains(document.activeElement)) first.focus(); }, 50);
   return api;
 }
 
@@ -150,6 +151,7 @@ export function toast(text, { type = '', action, actionLabel, timeout = 3500 } =
   el.innerHTML = `<span>${esc(text)}</span>${action ? `<button class="link-btn">${esc(actionLabel)}</button>` : ''}`;
   if (action) el.querySelector('button').onclick = () => { action(); el.remove(); };
   host.appendChild(el);
+  while (host.children.length > 3) host.firstElementChild.remove();
   requestAnimationFrame(() => el.classList.add('show'));
   setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 250); }, timeout);
 }

@@ -10,6 +10,8 @@ import { emojiPanelHtml, bindEmojiPanel, pushRecent } from './emoji.js';
 import { Recorder, toggleVoice, seekVoice, cycleSpeed } from './voice.js';
 import { startCall, joinCall } from './call.js';
 import * as app from './app.js';
+import { taskDialog, setTaskStatus, approvalDialog, decideApproval, meetingDialog, rsvp, kudosDialog, ackMessage, ackListDialog } from './work-ui.js';
+import { recordVideoNote } from './videonote.js';
 
 const PAGE = 50;
 let V = null; // состояние открытого чата
@@ -131,8 +133,8 @@ function chatShellHtml(chat) {
 }
 
 function wallpaperStyle() {
-  const w = S.settings.wallpaper || 'pattern';
-  return `--wall:var(--wall-${w}, var(--wall-pattern))`;
+  const w = S.settings.wallpaper || 'animated';
+  return `--wall:var(--wall-${w}, var(--wall-pattern))" data-wall="${w}`;
 }
 
 export function renderHead() {
@@ -224,11 +226,22 @@ function renderAll() {
   const chat = S.chats.get(V.chatId);
   let html = st.hasMoreTop ? '<div class="load-more-top"><span class="spinner"></span></div>' : chatIntro(chat);
   const list = st.list.filter((m) => !m.deleted);
+  const isJoin = (m) => m && m.kind === 'system' && m.meta?.event === 'joined';
   list.forEach((m, i) => {
     const prev = list[i - 1];
     if (!prev || !sameDay(prev.created_at, m.created_at)) html += dayDivider(m.created_at, fmtDay(m.created_at));
     if (V.unreadMarker && prev && prev.id <= V.unreadMarker && m.id > V.unreadMarker && m.user_id !== S.me.id) {
       html += `<div class="unread-divider"><span>${esc(t('chat.unread_below'))}</span></div>`;
+    }
+    // Серию «X присоединился» подряд сворачиваем в одну строку
+    if (isJoin(m) && isJoin(prev) && sameDay(prev.created_at, m.created_at)) return;
+    if (isJoin(m) && isJoin(list[i + 1])) {
+      const run = [];
+      for (let j = i; isJoin(list[j]) && sameDay(list[j].created_at, m.created_at); j++) run.push(list[j]);
+      const names = run.map((x) => userName(x.meta.actor).split(' ')[0]);
+      const text = names.length > 3 ? t('sys.joined_many', { names: names.slice(0, 2).join(', '), n: names.length - 2 }) : t('sys.joined', { actor: names.join(', ') });
+      html += `<div class="msg system" data-id="${run[run.length - 1].id}"><div class="sys-pill">${esc(text)}</div></div>`;
+      return;
     }
     html += messageHtml(m, chat, { prev, next: list[i + 1] });
   });
@@ -269,6 +282,7 @@ function replaceNode(m) {
 
 /** Новое сообщение в открытом чате. */
 function addMessage(m) {
+  if (m.thread_id) return; // ответы в ветке живут в панели ветки
   const st = store(m.chat_id);
   if (st.list.some((x) => x.id === m.id)) { updateMessage(m); return; }
   // Своё сообщение могло уже стоять «в ожидании» с временным id.
@@ -295,6 +309,7 @@ function addMessage(m) {
   html += messageHtml(m, chat, { prev, next: null });
   V.list.querySelector('.empty-chat')?.remove();
   V.list.insertAdjacentHTML('beforeend', html);
+  V.list.lastElementChild?.classList.add('appear');
   if (prev && groupedWith(prev, m)) replaceNode(prev);
   if (wasBottom || m.user_id === S.me.id) scrollToBottom(true);
   else updateToBottom();
@@ -537,6 +552,7 @@ function onInput(e) {
     app.socket().send({ type: 'typing', chat_id: V.chatId, action: 'typing' });
   }
   mentionAutocomplete(ta);
+  templatesPopup(ta);
   saveDraftSoon();
 }
 const saveDraftSoon = debounce(saveDraft, 1500);
@@ -553,7 +569,7 @@ function onKeyDown(e) {
       items.forEach((x, j) => x.classList.toggle('on', j === i));
       return;
     }
-    if ((e.key === 'Enter' || e.key === 'Tab') && items[i]) { e.preventDefault(); pickMention(items[i].dataset.login); return; }
+    if ((e.key === 'Enter' || e.key === 'Tab') && items[i]) { e.preventDefault(); if (items[i].dataset.tpl) items[i].click(); else pickMention(items[i].dataset.login); return; }
     if (e.key === 'Escape') { pop.classList.add('hidden'); return; }
   }
   const enterSends = S.settings.sendOnEnter !== false;
@@ -708,7 +724,7 @@ async function sendCurrent(opts = {}) {
   const temp = { id: tmpId, chat_id: chatId, user_id: S.me.id, kind: 'text', body: text, reply: reply ? { ...reply, body: reply.body } : null, meta: {}, created_at: Date.now(), _pending: true, _nonce: tmpId, silent: !!opts.silent };
   pushPending(temp);
   try {
-    const m = await post(`/api/chats/${chatId}/messages`, { body: text, reply_to: reply?.id, silent: !!opts.silent });
+    const m = await post(`/api/chats/${chatId}/messages`, { body: text, reply_to: reply?.id, silent: !!opts.silent, ack_required: !!opts.ack });
     m._nonce = tmpId;
     resolvePending(chatId, tmpId, m);
   } catch (e) {
@@ -751,6 +767,8 @@ function sendMenu(anchor) {
     { icon: 'clock', label: t('compose.send_later'), onClick: async () => { const at = await pickDateTime(t('compose.send_later')); if (at) sendCurrent({ at }); } },
     { icon: 'bellOff', label: t('compose.send_silent'), onClick: () => sendCurrent({ silent: true }) },
     { icon: 'calendar', label: t('compose.scheduled_list'), onClick: () => showScheduled() },
+    ['group', 'channel'].includes(S.chats.get(V.chatId)?.type) && ['owner', 'admin'].includes(S.chats.get(V.chatId)?.my_role)
+      && { icon: 'shield', label: t('ack.send'), onClick: () => sendCurrent({ ack: true }) },
   ], anchor);
 }
 
@@ -927,6 +945,9 @@ function messageMenu(m, at) {
   const header = m.kind === 'system' ? '' : `<div class="ctx-reacts">${quick.map((e) => `<button data-qr="${e}">${e}</button>`).join('')}<button data-qr="+" class="more">${icon('plus', 16)}</button></div>`;
   const items = [
     canWrite && m.kind !== 'system' && { icon: 'reply', label: t('msg.reply'), onClick: () => startReply(m) },
+    m.kind !== 'system' && !m.thread_id && ['group', 'channel', 'direct'].includes(chat.type) && { icon: 'chat', label: t('thread.reply'), onClick: () => app.openPanel({ type: 'thread', id: m.id }) },
+    m.kind !== 'system' && canWrite && { icon: 'check', label: t('task.from_msg'), onClick: () => taskDialog({ chatId: chat.id, source: m }) },
+    !mine && m.user_id && m.kind !== 'system' && ['group', 'direct'].includes(chat.type) && { icon: 'star', label: t('kudos.thank'), onClick: () => kudosDialog(chat.id, [m.user_id]) },
     editable && { icon: 'edit', label: t('msg.edit'), onClick: () => startEdit(m) },
     m.body && m.kind !== 'poll' && { icon: 'copy', label: t('msg.copy'), onClick: () => copyText(m.body).then(() => toast(t('msg.copied'))) },
     canPin && m.kind !== 'system' && { icon: 'pin', label: chat.pinned_msg_id === m.id ? t('msg.unpin') : t('msg.pin'), onClick: () => post(`/api/chats/${chat.id}/pin`, { message_id: chat.pinned_msg_id === m.id ? null : m.id }).catch((e) => toast(errText(e), { type: 'error' })) },
@@ -935,7 +956,7 @@ function messageMenu(m, at) {
     S.meta.ai && m.body && m.kind !== 'system' && { icon: 'translate', label: t('ai.translate'), onClick: () => translateMessage(m) },
     mine && chat.type === 'group' && { icon: 'eye', label: t('msg.seen_by'), onClick: () => readersDialog(m) },
     m.file && m.file.url !== '#' && { icon: 'download', label: t('msg.download'), onClick: () => { const a = document.createElement('a'); a.href = `${m.file.url}?download=1`; a.download = m.file.name; a.click(); } },
-    m.kind !== 'system' && { icon: 'check', label: t('msg.select'), onClick: () => toggleSelect(m.id) },
+    m.kind !== 'system' && { icon: 'list', label: t('msg.select'), onClick: () => toggleSelect(m.id) },
     canDelete && { sep: true },
     canDelete && { icon: 'trash', label: t('msg.delete'), danger: true, onClick: () => deleteMessages([m.id]) },
   ];
@@ -1277,7 +1298,14 @@ function onClick(e) {
       contextMenu([
         { icon: 'image', label: t('compose.photo_video'), onClick: () => { const fi = $('#file-input'); fi.accept = 'image/*,video/*'; fi.click(); } },
         { icon: 'file', label: t('compose.file'), onClick: () => { const fi = $('#file-input'); fi.accept = ''; fi.click(); } },
+        { icon: 'videoNote', label: t('vnote.record'), onClick: () => recordVideoNote(chat.id) },
+        { sep: true },
+        chat.type !== 'ai' && { icon: 'check', label: t('task.new'), onClick: () => taskDialog({ chatId: chat.id }) },
+        ['group', 'direct'].includes(chat.type) && { icon: 'briefcase', label: t('appr.new'), onClick: () => approvalDialog(chat.id) },
+        ['group', 'direct', 'channel'].includes(chat.type) && { icon: 'calendar', label: t('meet.new'), onClick: () => meetingDialog(chat.id) },
+        ['group', 'direct'].includes(chat.type) && { icon: 'star', label: t('kudos.new'), onClick: () => kudosDialog(chat.id) },
         chat.type !== 'direct' && chat.type !== 'saved' && chat.type !== 'ai' && { icon: 'poll', label: t('poll.new'), onClick: () => pollDialog() },
+        { sep: true },
         { icon: 'clock', label: t('compose.send_later'), onClick: async () => { if (!$('#composer-input').value.trim()) { toast(t('compose.type_first')); return; } const at = await pickDateTime(t('compose.send_later')); if (at) sendCurrent({ at }); } },
       ], a);
       break;
@@ -1302,6 +1330,8 @@ function onClick(e) {
     }
     case 'close-poll': post(`/api/messages/${a.dataset.id}/close-poll`).catch((err) => toast(errText(err), { type: 'error' })); break;
     case 'user': app.openPanel({ type: 'user', id: Number(a.dataset.uid) }); break;
+    case 'thread': app.openPanel({ type: 'thread', id: Number(a.dataset.id) }); break;
+    default: if (!handleCardAction(act, a)) { /* нет обработчика */ }
     case 'mention': app.openUserByLogin(a.dataset.login); break;
     case 'spoiler': a.classList.add('shown'); break;
     case 'view-media': app.viewMedia(V.chatId, Number(a.dataset.id)); break;
@@ -1319,7 +1349,6 @@ function onClick(e) {
       clearSelection();
       break;
     }
-    default:
   }
 }
 
@@ -1328,3 +1357,78 @@ document.addEventListener('keydown', (e) => {
   if (!V || e.key !== 'Escape') return;
   if (S.selection.size) { clearSelection(); e.stopPropagation(); }
 });
+
+// ---------- Общие действия карточек (лента и панель ветки) ----------
+export function handleCardAction(act, a) {
+  switch (act) {
+    case 'task-status': setTaskStatus(Number(a.dataset.tid), a.dataset.status); return true;
+    case 'task-open': {
+      const id = Number(a.dataset.tid);
+      const msg = [...S.messages.values()].flatMap((x) => x.list).find((x) => x.task?.id === id);
+      if (msg?.task) taskDialog({ task: msg.task });
+      return true;
+    }
+    case 'approve': decideApproval(Number(a.dataset.id), 'approve'); return true;
+    case 'reject': decideApproval(Number(a.dataset.id), 'reject'); return true;
+    case 'rsvp': rsvp(Number(a.dataset.mid), a.dataset.r); return true;
+    case 'meeting-join': {
+      const id = Number(a.dataset.mid);
+      const msg = [...S.messages.values()].flatMap((x) => x.list).find((x) => x.meeting?.id === id || x.meta?.meeting_id === id);
+      const chatId = msg?.chat_id || V?.chatId;
+      if (chatId) startCall(chatId, 'video');
+      return true;
+    }
+    case 'ack': ackMessage(Number(a.dataset.id)); return true;
+    case 'ack-list': ackListDialog(Number(a.dataset.id)); return true;
+    case 'round-play': {
+      const v = a.querySelector('video');
+      if (!v) return true;
+      if (v.muted || v.paused) {
+        document.querySelectorAll('.round-video.playing video').forEach((x) => { if (x !== v) { x.muted = true; x.closest('.round-video').classList.remove('playing'); } });
+        v.muted = false; v.loop = false; v.currentTime = v.paused ? v.currentTime : 0; v.play().catch(() => {});
+        a.classList.add('playing', 'expanded');
+        v.onended = () => { a.classList.remove('playing', 'expanded'); v.muted = true; v.loop = true; v.play().catch(() => {}); };
+        v.ontimeupdate = () => { const ring = a.querySelector('.round-ring circle'); if (ring && v.duration) ring.style.strokeDashoffset = String(301.6 * (1 - v.currentTime / v.duration)); };
+      } else { v.pause(); a.classList.remove('playing'); }
+      return true;
+    }
+    default: return false;
+  }
+}
+
+// Видео-кружки в ленте тихо крутятся, когда видны на экране.
+const roundObserver = 'IntersectionObserver' in window ? new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    const v = e.target.querySelector('video');
+    if (!v || e.target.classList.contains('playing')) continue;
+    if (e.isIntersecting) v.play().catch(() => {}); else v.pause();
+  }
+}, { threshold: 0.6 }) : null;
+const roundMut = new MutationObserver(() => {
+  if (!roundObserver) return;
+  document.querySelectorAll('.round-video:not([data-obs])').forEach((el) => { el.dataset.obs = '1'; roundObserver.observe(el); });
+});
+roundMut.observe(document.body, { childList: true, subtree: true });
+
+// ---------- Шаблоны быстрых ответов: «/» в начале поля ----------
+function templatesPopup(ta) {
+  const pop = $('.mention-pop', V.el);
+  const m = /^\/([\p{L}0-9 ]*)$/u.exec(ta.value);
+  const list = S.settings.templates || [];
+  if (!m || !list.length) { if (pop.dataset.mode === 'tpl') { pop.classList.add('hidden'); pop.dataset.mode = ''; } return; }
+  const q = m[1].toLowerCase();
+  const found = list.filter((x) => x.toLowerCase().includes(q)).slice(0, 8);
+  if (!found.length) { pop.classList.add('hidden'); return; }
+  pop.dataset.mode = 'tpl';
+  pop.innerHTML = `<div class="mp-head">${esc(t('tpl.title'))}</div>` + found.map((x, i) => `<button class="mp-item ${i === 0 ? 'on' : ''}" data-tpl="${esc(x)}">${icon('list', 16)}<b>${esc(x.slice(0, 120))}</b></button>`).join('');
+  pop.classList.remove('hidden');
+  pop.onclick = (e) => {
+    const b = e.target.closest('[data-tpl]');
+    if (!b) return;
+    ta.value = b.dataset.tpl;
+    pop.classList.add('hidden');
+    pop.dataset.mode = '';
+    ta.focus();
+    ta.dispatchEvent(new Event('input'));
+  };
+}

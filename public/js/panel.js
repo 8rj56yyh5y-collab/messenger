@@ -8,6 +8,7 @@ import { modal, toast, confirmDialog, contextMenu, promptDialog } from './dialog
 import { startCall } from './call.js';
 import { previewText } from './messages.js';
 import * as app from './app.js';
+import { renderThread, closeThread } from './thread.js';
 
 let P = null; // { type, id, chatId, tab }
 
@@ -18,6 +19,7 @@ export function openPanel(target) {
 }
 export function closePanel() {
   P = null;
+  closeThread();
   document.body.classList.remove('panel-open');
   $('#panel').innerHTML = '';
 }
@@ -30,6 +32,7 @@ on('user:updated', (id) => { if (P && P.type === 'user' && P.id === id) render()
 async function render() {
   const el = $('#panel');
   if (!P) return;
+  if (P.type === 'thread') { renderThread(el, P.id, closePanel); return; }
   const target = { ...P };
   el.innerHTML = `<div class="panel-head"><button class="icon-btn ghost" data-pa="close">${icon('x')}</button><h3>${esc(P.type === 'user' ? t('panel.user') : t('panel.chat'))}</h3>
     <span class="grow"></span>${P.type === 'chat' ? '<span class="panel-edit-slot"></span>' : ''}</div><div class="panel-body"><div class="loading-msgs"><span class="spinner"></span></div></div>`;

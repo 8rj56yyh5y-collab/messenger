@@ -10,7 +10,7 @@ const ACCENTS = {
   blue: ['#3390ec', '#8774e1'], violet: ['#8774e1', '#c86bd6'], green: ['#4fae4e', '#2fa3a0'], lime: ['#86b300', '#3d9a50'],
   orange: ['#f08a24', '#e5533d'], pink: ['#e05a8c', '#a65be0'], graphite: ['#5f6b7a', '#2f3640'],
 };
-const WALLPAPERS = ['pattern', 'gradient', 'aurora', 'plain', 'dots'];
+const WALLPAPERS = ['animated', 'pattern', 'gradient', 'aurora', 'plain', 'dots'];
 
 export function applyTheme() {
   const pref = S.settings?.theme || (() => { try { return localStorage.getItem('gc-theme'); } catch { return null; } })() || 'system';
@@ -32,7 +32,7 @@ export function applyAppearance() {
   root.style.setProperty('--bubble-r', `${Number(s.bubbleRadius ?? 16)}px`);
   root.dataset.compact = s.compact ? '1' : '0';
   root.dataset.motion = s.animations === false ? 'off' : 'on';
-  document.querySelectorAll('.chat').forEach((el) => el.style.setProperty('--wall', `var(--wall-${s.wallpaper || 'pattern'})`));
+  document.querySelectorAll('.chat').forEach((el) => { el.style.setProperty('--wall', `var(--wall-${s.wallpaper || 'animated'})`); el.dataset.wall = s.wallpaper || 'animated'; });
 }
 
 async function saveSettings(part) {
@@ -89,6 +89,7 @@ const RENDER = {
         <label class="field"><span>${esc(t('profile.department'))}</span><input class="input" id="p-dep" maxlength="100" value="${esc(u.department)}" ${fromGobsek ? 'disabled' : ''}></label>
         <label class="field"><span>E-mail</span><input class="input" id="p-email" type="email" maxlength="100" value="${esc(u.email)}"></label>
         <label class="field"><span>${esc(t('profile.phone'))}</span><input class="input" id="p-phone" maxlength="40" value="${esc(u.phone)}"></label>
+        <label class="field"><span>${esc(t('profile.birthday'))}</span><input class="input" id="p-bd" type="date" value="${esc(/^\d{4}-/.test(u.birthday_full || '') ? u.birthday_full : '')}"></label>
       </div>
       ${fromGobsek ? `<p class="muted small">${icon('shield', 14)} ${esc(t('profile.from_gobsek'))}</p>` : ''}
       <p class="muted small">@${esc(u.login)}</p>
@@ -111,7 +112,7 @@ const RENDER = {
     el.querySelector('#p-save').onclick = async () => {
       const body = {
         name: el.querySelector('#p-name').value, status_text: el.querySelector('#p-st').value, bio: el.querySelector('#p-bio').value,
-        email: el.querySelector('#p-email').value, phone: el.querySelector('#p-phone').value,
+        email: el.querySelector('#p-email').value, phone: el.querySelector('#p-phone').value, birthday: el.querySelector('#p-bd').value,
       };
       if (!fromGobsek) { body.position = el.querySelector('#p-pos').value; body.department = el.querySelector('#p-dep').value; }
       if (avatarFile) body.avatar_file = avatarFile;
@@ -133,7 +134,7 @@ const RENDER = {
       <div class="sec-title">${esc(t('settings.accent'))}</div>
       <div class="accent-pick">${Object.entries(ACCENTS).map(([k, [a, b]]) => `<button class="accent ${((s.accent || 'blue') === k) ? 'on' : ''}" data-accent="${k}" style="background:linear-gradient(135deg,${a},${b})" title="${k}"></button>`).join('')}</div>
       <div class="sec-title">${esc(t('settings.wallpaper'))}</div>
-      <div class="wall-pick">${WALLPAPERS.map((w) => `<button class="wall ${(s.wallpaper || 'pattern') === w ? 'on' : ''}" data-wall="${w}" style="background:var(--wall-${w})"><span>${esc(t(`wall.${w}`))}</span></button>`).join('')}</div>
+      <div class="wall-pick">${WALLPAPERS.map((w) => `<button class="wall ${(s.wallpaper || 'animated') === w ? 'on' : ''} w-${w}" data-wall="${w}" style="background:var(--wall-${w})"><span>${esc(t(`wall.${w}`))}</span></button>`).join('')}</div>
       <div class="sec-title">${esc(t('settings.font_size'))} <small id="fs-val">${Number(s.fontSize) || 15}px</small></div>
       <input type="range" min="13" max="20" step="1" value="${Number(s.fontSize) || 15}" id="fs" class="range">
       <div class="sec-title">${esc(t('settings.bubble_radius'))} <small id="br-val">${s.bubbleRadius ?? 16}px</small></div>
@@ -198,10 +199,20 @@ const RENDER = {
       <div class="sec-title">${esc(t('settings.quick_reactions'))}</div>
       <p class="muted small">${esc(t('settings.quick_hint'))}</p>
       <div class="react-pick">${S.meta.reactions.map((e) => `<button class="${quick.includes(e) ? 'on' : ''}" data-r="${e}">${e}</button>`).join('')}</div>
+      <div class="sec-title">${esc(t('tpl.title'))}</div>
+      <p class="muted small">${esc(t('tpl.hint'))}</p>
+      <textarea class="input" id="c-tpl" rows="4" placeholder="${esc(t('tpl.ph'))}">${esc((s.templates || []).join('\n'))}</textarea>
+      <div class="sec-title">${esc(t('auto.title'))}</div>
+      ${toggle('c-auto', t('auto.enable'), s.autoReply?.enabled, t('auto.hint'))}
+      <textarea class="input" id="c-auto-text" rows="2" maxlength="1000" placeholder="${esc(t('auto.ph'))}">${esc(s.autoReply?.text || '')}</textarea>
       <div class="sec-title">${esc(t('settings.shortcuts'))}</div>
       <div class="shortcuts">${[['Ctrl+K', 'sc.search'], ['Alt+↑/↓', 'sc.switch'], ['Esc', 'sc.close'], ['↑', 'sc.edit_last'], ['Ctrl+B / Ctrl+I', 'sc.format'], ['Shift+Enter', 'sc.newline'], ['M / V', 'sc.call'], ['Ctrl+,', 'sc.settings']]
       .map(([k, l]) => `<div><kbd>${esc(k)}</kbd><span>${esc(t(l))}</span></div>`).join('')}</div>`;
     el.querySelector('#c-enter').onchange = (e) => saveSettings({ sendOnEnter: e.target.checked });
+    el.querySelector('#c-tpl').onchange = (e) => saveSettings({ templates: e.target.value.split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 50) });
+    const saveAuto = () => saveSettings({ autoReply: { enabled: el.querySelector('#c-auto').checked, text: el.querySelector('#c-auto-text').value.trim() } });
+    el.querySelector('#c-auto').onchange = saveAuto;
+    el.querySelector('#c-auto-text').onchange = saveAuto;
     el.querySelectorAll('[data-tf]').forEach((b) => { b.onclick = () => { saveSettings({ timeFormat: b.dataset.tf }); setTimeFormat(b.dataset.tf); RENDER.chats(el); }; });
     el.querySelectorAll('[data-r]').forEach((b) => {
       b.onclick = () => {
