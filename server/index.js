@@ -11,6 +11,7 @@ const calls = require('./calls');
 const files = require('./files');
 const extras = require('./extras');
 const ai = require('./ai');
+const work = require('./work');
 const rt = require('./realtime');
 const { acceptUpgrade, Hub } = require('./ws');
 const pkg = require('../package.json');
@@ -47,6 +48,7 @@ function meUser(u) {
   out.lang = u.lang;
   out.must_change_pw = !!u.must_change_pw;
   out.has_password = !!u.pass_hash;
+  out.birthday_full = u.birthday || '';
   return out;
 }
 
@@ -98,6 +100,11 @@ route('PATCH', '/api/me', async (req, res, p, u) => {
     sets.push(`${k} = ?`); vals.push(v);
   }
   if ('status' in b && STATUSES.includes(b.status)) { sets.push('status = ?'); vals.push(b.status); }
+  if ('birthday' in b) {
+    const bd = String(b.birthday || '').trim();
+    if (bd && !/^(\d{4}-)?\d{2}-\d{2}$/.test(bd)) throw new HttpError(400, 'Дата рождения: ГГГГ-ММ-ДД');
+    sets.push('birthday = ?'); vals.push(bd);
+  }
   if ('lang' in b && (LANGS.includes(b.lang) || b.lang === '')) { sets.push('lang = ?'); vals.push(b.lang); }
   if ('avatar_file' in b) {
     const fid = b.avatar_file ? int(b.avatar_file) : null;
@@ -110,7 +117,8 @@ route('PATCH', '/api/me', async (req, res, p, u) => {
   if (b.settings && typeof b.settings === 'object') {
     const cur = chats.userSettings(u);
     const allowed = ['theme', 'accent', 'wallpaper', 'fontSize', 'bubbleRadius', 'sendOnEnter', 'notifications', 'sounds', 'preview',
-      'hideLastSeen', 'hideEmail', 'hidePhone', 'compact', 'animations', 'folders', 'quickReactions', 'readReceipts', 'timeFormat'];
+      'hideLastSeen', 'hideEmail', 'hidePhone', 'compact', 'animations', 'folders', 'quickReactions', 'readReceipts', 'timeFormat',
+      'autoReply', 'templates', 'animatedWallpaper', 'density'];
     for (const k of allowed) if (k in b.settings) cur[k] = b.settings[k];
     const json = JSON.stringify(cur);
     if (json.length > 20000) throw new HttpError(400, 'Слишком много настроек');
@@ -214,6 +222,26 @@ route('GET', '/api/scheduled', (req, res, p, u, q) => extras.listScheduled(u.id,
 route('DELETE', '/api/scheduled/:id', (req, res, p, u) => extras.cancelScheduled(u.id, p.id));
 route('GET', '/api/search', (req, res, p, u, q) => chats.search(u.id, q.get('q'), q.get('chat_id')));
 
+route('GET', '/api/messages/:id/thread', (req, res, p, u) => chats.getThread(u.id, p.id));
+route('POST', '/api/messages/:id/ack', (req, res, p, u) => chats.ack(u.id, p.id));
+route('GET', '/api/messages/:id/acks', (req, res, p, u) => chats.ackList(u.id, p.id));
+route('POST', '/api/messages/:id/decide', async (req, res, p, u) => work.decide(u.id, p.id, await readJson(req)));
+
+// --- Работа: задачи, погодження, подяки, встречи, пульс ---
+route('GET', '/api/tasks', (req, res, p, u, q) => work.listTasks(u.id, q.get('scope') || 'mine'));
+route('POST', '/api/tasks', async (req, res, p, u) => work.createTask(u.id, await readJson(req)));
+route('PATCH', '/api/tasks/:id', async (req, res, p, u) => work.updateTask(u.id, p.id, await readJson(req)));
+route('POST', '/api/chats/:id/approvals', async (req, res, p, u) => work.createApproval(u.id, p.id, await readJson(req)));
+route('GET', '/api/approvals/pending', (req, res, p, u) => work.pendingApprovals(u.id));
+route('POST', '/api/chats/:id/kudos', async (req, res, p, u) => work.giveKudos(u.id, p.id, await readJson(req)));
+route('GET', '/api/kudos', (req, res, p, u) => work.kudosBoard(u.id));
+route('POST', '/api/chats/:id/meetings', async (req, res, p, u) => work.createMeeting(u.id, p.id, await readJson(req)));
+route('GET', '/api/meetings', (req, res, p, u, q) => work.listMeetings(u.id, q.get('from'), q.get('to')));
+route('POST', '/api/meetings/:id/rsvp', async (req, res, p, u) => work.rsvp(u.id, p.id, (await readJson(req)).rsvp));
+route('POST', '/api/meetings/:id/cancel', (req, res, p, u) => work.cancelMeeting(u.id, p.id));
+route('GET', '/api/pulse', (req, res, p, u) => work.pulse(u.id));
+route('GET', '/api/acks/pending', (req, res, p, u) => chats.pendingAcks(u.id));
+
 // --- Файлы ---
 route('POST', '/api/files', (req, res, p, u) => files.upload(req, u), { raw: true });
 route('GET', '/api/files/:id', (req, res, p, u, q) => { files.serve(req, res, u, p.id, q.get('download') === '1'); return undefined; });
@@ -232,6 +260,7 @@ route('POST', '/api/ai/translate', async (req, res, p, u) => {
   return ai.translate(u, b.message_id, b.lang);
 });
 route('POST', '/api/ai/compose', async (req, res, p, u) => ai.compose(u, await readJson(req)));
+route('POST', '/api/ai/digest', (req, res, p, u) => ai.digest(u));
 
 // --- Администратор ---
 route('GET', '/api/admin/users', (req, res, p, u) => { extras.requireAdmin(u); return extras.adminUsers(); });
@@ -390,6 +419,7 @@ server.on('upgrade', (req, socket) => {
 });
 
 extras.startScheduler();
+work.start();
 
 if (require.main === module) {
   const PORT = Number(process.env.PORT) || 3000;

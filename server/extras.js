@@ -162,7 +162,7 @@ function updateUser(admin, id, b) {
   if (!u || u.is_bot) throw new HttpError(404, 'Не найден');
   const sets = [];
   const vals = [];
-  for (const k of ['name', 'email', 'phone', 'position', 'department']) if (k in b) { sets.push(`${k} = ?`); vals.push(str(b[k], 200)); }
+  for (const k of ['name', 'email', 'phone', 'position', 'department', 'birthday']) if (k in b) { sets.push(`${k} = ?`); vals.push(str(b[k], 200)); }
   if ('role' in b) {
     if (u.id === admin.id && b.role !== 'admin') throw new HttpError(400, 'Нельзя снять права с себя');
     sets.push('role = ?'); vals.push(b.role === 'admin' ? 'admin' : 'member');

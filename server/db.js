@@ -97,7 +97,8 @@ CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY,
   chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
   user_id INTEGER REFERENCES users(id),
-  kind TEXT NOT NULL DEFAULT 'text' CHECK (kind IN ('text','file','image','video','voice','poll','system','call')),
+  kind TEXT NOT NULL DEFAULT 'text',          -- text|file|image|video|voice|poll|system|call|task|approval|kudos|meeting
+  thread_id INTEGER,                         -- ответ в ветке: id корневого сообщения
   body TEXT NOT NULL DEFAULT '',
   file_id INTEGER REFERENCES files(id),
   reply_to INTEGER,
@@ -184,6 +185,57 @@ CREATE TABLE IF NOT EXISTS invites (
   created_at INTEGER NOT NULL
 );
 
+-- Задачи из сообщений
+CREATE TABLE IF NOT EXISTS tasks (
+  id INTEGER PRIMARY KEY,
+  chat_id INTEGER REFERENCES chats(id) ON DELETE SET NULL,
+  message_id INTEGER,                        -- карточка задачи в чате
+  source_msg_id INTEGER,                     -- сообщение, из которого сделана задача
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  assignee_id INTEGER REFERENCES users(id),
+  creator_id INTEGER NOT NULL REFERENCES users(id),
+  status TEXT NOT NULL DEFAULT 'todo',       -- todo | doing | review | done | cancelled
+  priority TEXT NOT NULL DEFAULT 'normal',   -- low | normal | high | urgent
+  due_at INTEGER,
+  reminded INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  done_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS tasks_assignee ON tasks(assignee_id, status);
+CREATE INDEX IF NOT EXISTS tasks_creator ON tasks(creator_id, status);
+
+-- «Ознакомлен» для обязательных объявлений
+CREATE TABLE IF NOT EXISTS message_acks (
+  message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (message_id, user_id)
+);
+
+-- Встречи (нарады) с приглашениями
+CREATE TABLE IF NOT EXISTS meetings (
+  id INTEGER PRIMARY KEY,
+  chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+  message_id INTEGER,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  starts_at INTEGER NOT NULL,
+  duration_min INTEGER NOT NULL DEFAULT 30,
+  created_by INTEGER NOT NULL REFERENCES users(id),
+  reminded INTEGER NOT NULL DEFAULT 0,
+  cancelled INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS meetings_time ON meetings(starts_at);
+CREATE TABLE IF NOT EXISTS meeting_attendees (
+  meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  rsvp TEXT NOT NULL DEFAULT 'pending',      -- pending | yes | no | maybe
+  PRIMARY KEY (meeting_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY,
   user_id INTEGER,
@@ -192,6 +244,41 @@ CREATE TABLE IF NOT EXISTS audit (
   created_at INTEGER NOT NULL
 );
 `);
+
+// ---------- Миграции существующих баз ----------
+function hasColumn(table, col) {
+  return db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col);
+}
+(function migrate() {
+  // v1 → v2: у messages был CHECK на kind (новые типы карточек не вставлялись) и не было thread_id.
+  const sql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'messages'").get()?.sql || '';
+  if (sql.includes('CHECK (kind IN')) {
+    db.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;');
+    db.exec('BEGIN');
+    try {
+      db.exec(`ALTER TABLE messages RENAME TO messages_v1;
+        CREATE TABLE messages (
+          id INTEGER PRIMARY KEY, chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE, user_id INTEGER REFERENCES users(id),
+          kind TEXT NOT NULL DEFAULT 'text', thread_id INTEGER, body TEXT NOT NULL DEFAULT '', file_id INTEGER REFERENCES files(id),
+          reply_to INTEGER, fwd_user_id INTEGER, fwd_name TEXT NOT NULL DEFAULT '', meta TEXT NOT NULL DEFAULT '{}',
+          silent INTEGER NOT NULL DEFAULT 0, edited_at INTEGER, deleted INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+        INSERT INTO messages (id, chat_id, user_id, kind, body, file_id, reply_to, fwd_user_id, fwd_name, meta, silent, edited_at, deleted, created_at)
+          SELECT id, chat_id, user_id, kind, body, file_id, reply_to, fwd_user_id, fwd_name, meta, silent, edited_at, deleted, created_at FROM messages_v1;
+        DROP TABLE messages_v1;
+        CREATE INDEX IF NOT EXISTS messages_chat ON messages(chat_id, id);
+        CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN INSERT INTO messages_fts(rowid, body) VALUES (new.id, new.body); END;
+        CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN INSERT INTO messages_fts(messages_fts, rowid, body) VALUES ('delete', old.id, old.body); END;
+        CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF body ON messages BEGIN
+          INSERT INTO messages_fts(messages_fts, rowid, body) VALUES ('delete', old.id, old.body);
+          INSERT INTO messages_fts(rowid, body) VALUES (new.id, new.body); END;`);
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; } finally {
+      db.exec('PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON;');
+    }
+  }
+  if (!hasColumn('users', 'birthday')) db.exec("ALTER TABLE users ADD COLUMN birthday TEXT NOT NULL DEFAULT ''"); // ММ-ДД
+  db.exec('CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id) WHERE thread_id IS NOT NULL');
+})();
 
 function logEvent(userId, action, details = '') {
   db.prepare('INSERT INTO audit (user_id, action, details, created_at) VALUES (?, ?, ?, ?)')
@@ -211,4 +298,4 @@ function tx(fn) {
   }
 }
 
-module.exports = { db, tx, logEvent, DATA_DIR, UPLOAD_DIR };
+module.exports = { db, tx, logEvent, hasColumn, DATA_DIR, UPLOAD_DIR };

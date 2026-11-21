@@ -355,3 +355,82 @@ test('ИИ без ключа: понятная ошибка и заглушка 
   const msgs = (await ivan.get(`/api/chats/${aiChat.data.id}/messages`)).data;
   assert.equal(msgs[msgs.length - 1].meta.ai_notice, 'ai_off');
 });
+
+test('ветки обсуждений: ответы не попадают в общую ленту', async () => {
+  const root = (await ivan.post(`/api/chats/${groupId}/messages`, { body: 'Обговоримо бюджет у гілці' })).data;
+  const r1 = await olena.post(`/api/chats/${groupId}/messages`, { body: 'Пропоную +10%', thread_id: root.id });
+  assert.equal(r1.data.thread_id, root.id);
+  const main = (await olena.get(`/api/chats/${groupId}/messages`)).data;
+  assert.ok(!main.some((m) => m.id === r1.data.id), 'ответа нет в общей ленте');
+  assert.equal(main.find((m) => m.id === root.id).thread.count, 1);
+  const th = (await ivan.get(`/api/messages/${root.id}/thread`)).data;
+  assert.equal(th.replies.length, 1);
+  assert.equal((await olena.post(`/api/chats/${groupId}/messages`, { body: 'x', thread_id: r1.data.id })).status, 400, 'ветка в ветке запрещена');
+});
+
+test('задачи из сообщения: создание, статус, права, список', async () => {
+  const src = (await olena.post(`/api/chats/${directId}/messages`, { body: 'Треба звірити сальдо з 1С' })).data;
+  const t = await olena.post('/api/tasks', { chat_id: directId, source_msg_id: src.id, title: 'Звірити сальдо', assignee_id: ivanId, due_at: Date.now() + 86400e3, priority: 'high' });
+  assert.equal(t.status, 200, JSON.stringify(t.data));
+  assert.equal(t.data.assignee_id, ivanId);
+  const card = (await ivan.get(`/api/chats/${directId}/messages`)).data.find((m) => m.kind === 'task');
+  assert.equal(card.task.title, 'Звірити сальдо');
+  assert.equal(card.reply.id, src.id);
+  const mine = (await ivan.get('/api/tasks?scope=mine')).data;
+  assert.ok(mine.some((x) => x.id === t.data.id && x.chat.id === directId));
+  const upd = await ivan.patch(`/api/tasks/${t.data.id}`, { status: 'done', title: 'взлом' });
+  assert.equal(upd.data.status, 'done');
+  assert.equal(upd.data.title, 'Звірити сальдо', 'исполнитель не меняет название');
+  const outsider = await loginAs('outsider', 'outside123');
+  assert.equal((await outsider.patch(`/api/tasks/${t.data.id}`, { status: 'todo' })).status, 404);
+  const empty = await olena.post('/api/tasks', { chat_id: groupId, title: ' ' });
+  assert.equal(empty.data.code, 'title_required');
+});
+
+test('погодження: все согласующие, отказ с причиной', async () => {
+  const a = await olena.post(`/api/chats/${groupId}/approvals`, { title: 'Оплата оренди', amount: 45000, approvers: [ivanId] });
+  assert.equal(a.status, 200, JSON.stringify(a.data));
+  assert.equal(a.data.meta.status, 'pending');
+  const pend = (await ivan.get('/api/approvals/pending')).data;
+  assert.ok(pend.some((m) => m.id === a.data.id));
+  assert.equal((await olena.post(`/api/messages/${a.data.id}/decide`, { decision: 'approve' })).status, 403, 'автор не согласует сам себе');
+  const noReason = await ivan.post(`/api/messages/${a.data.id}/decide`, { decision: 'reject' });
+  assert.equal(noReason.data.code, 'comment_required');
+  const ok = await ivan.post(`/api/messages/${a.data.id}/decide`, { decision: 'approve', comment: 'Ок' });
+  assert.equal(ok.data.meta.status, 'approved');
+  assert.equal((await ivan.post(`/api/messages/${a.data.id}/decide`, { decision: 'reject', comment: 'передумав' })).data.code, 'approval_closed');
+  assert.equal(ok.data.thread.count, 1, 'решение записано в ветку');
+});
+
+test('обязательно к ознакомлению', async () => {
+  const no = await olena.post(`/api/chats/${directId}/messages`, { body: 'x', ack_required: true });
+  assert.equal(no.status, 403);
+  const m = (await ivan.post(`/api/chats/${groupId}/messages`, { body: 'Новий регламент платежів', ack_required: true })).data;
+  assert.equal(m.ack.count, 0);
+  assert.ok((await olena.get('/api/acks/pending')).data.some((x) => x.id === m.id));
+  const r = await olena.post(`/api/messages/${m.id}/ack`);
+  assert.equal(r.data.ack.mine, true);
+  const list = (await ivan.get(`/api/messages/${m.id}/acks`)).data;
+  assert.ok(list.find((u) => u.id === olenaId).acked_at);
+});
+
+test('подяки, встречи, пульс', async () => {
+  const k = await olena.post(`/api/chats/${groupId}/kudos`, { to: [ivanId], badge: 'help', text: 'Дякую за звірку!' });
+  assert.equal(k.status, 200);
+  assert.equal((await olena.post(`/api/chats/${groupId}/kudos`, { to: [olenaId] })).data.code, 'kudos_to');
+  const board = (await ivan.get('/api/kudos')).data;
+  assert.equal(board.mine.count, 1);
+  const mt = await ivan.post(`/api/chats/${groupId}/meetings`, { title: 'Бюджет на грудень', starts_at: Date.now() + 5 * 60e3, duration_min: 45 });
+  assert.equal(mt.status, 200, JSON.stringify(mt.data));
+  assert.equal(mt.data.attendees.length, 2);
+  const rs = await olena.post(`/api/meetings/${mt.data.id}/rsvp`, { rsvp: 'yes' });
+  assert.equal(rs.data.my_rsvp, 'yes');
+  require('../server/work').tick();
+  const msgs = (await olena.get(`/api/chats/${groupId}/messages`)).data;
+  assert.ok(msgs.some((m) => m.meta?.event === 'meeting_soon'));
+  await olena.patch('/api/me', { birthday: '1990-' + new Date().toISOString().slice(5, 10) });
+  const p = (await ivan.get('/api/pulse')).data;
+  assert.ok(p.birthdays.some((b) => b.user.id === olenaId && b.in_days === 0));
+  assert.ok(p.meetings.some((m) => m.id === mt.data.id));
+  assert.ok(p.kudos.top.length >= 1);
+});

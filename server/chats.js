@@ -20,7 +20,7 @@ function publicUser(u, viewerId) {
     id: u.id, login: u.login, name: u.name, position: u.position, department: u.department,
     email: s.hideEmail && u.id !== viewerId ? '' : u.email,
     phone: s.hidePhone && u.id !== viewerId ? '' : u.phone,
-    bio: u.bio, status: u.status, status_text: u.status_text, color: u.color,
+    bio: u.bio, status: u.status, status_text: u.status_text, color: u.color, birthday: u.birthday ? String(u.birthday).slice(-5) : '',
     avatar: u.avatar_file ? `/api/files/${u.avatar_file}` : null,
     role: u.role, is_bot: !!u.is_bot, active: !!u.active,
     online: rt.isOnline(u.id) && !hideSeen,
@@ -156,13 +156,51 @@ function serializeMessage(m, viewerId) {
     out.reactions = [...map].map(([emoji, users]) => ({ emoji, users, mine: users.includes(viewerId) }));
   }
   if (m.kind === 'poll') out.poll = pollResults(m, meta, viewerId);
+  if (m.thread_id) out.thread_id = m.thread_id;
+  else {
+    // Сводка ветки обсуждения под сообщением
+    const th = db.prepare('SELECT COUNT(*) AS n, MAX(created_at) AS last_at FROM messages WHERE thread_id = ? AND deleted = 0').get(m.id);
+    if (th.n) {
+      const who = db.prepare('SELECT DISTINCT user_id FROM messages WHERE thread_id = ? AND deleted = 0 AND user_id IS NOT NULL ORDER BY id DESC LIMIT 3').all(m.id).map((r) => r.user_id);
+      out.thread = { count: th.n, last_at: th.last_at, users: who };
+    }
+  }
+  if (meta.ack_required) {
+    const acks = db.prepare('SELECT user_id FROM message_acks WHERE message_id = ?').all(m.id).map((r) => r.user_id);
+    const total = db.prepare('SELECT COUNT(*) AS n FROM chat_members cm JOIN users u ON u.id = cm.user_id WHERE cm.chat_id = ? AND u.is_bot = 0 AND cm.user_id <> ?').get(m.chat_id, m.user_id || 0).n;
+    out.ack = { count: acks.length, total, mine: acks.includes(viewerId) };
+  }
+  if (m.kind === 'task' && meta.task_id) {
+    const tk = db.prepare('SELECT * FROM tasks WHERE id = ?').get(meta.task_id);
+    if (tk) out.task = taskView(tk);
+  }
+  if (m.kind === 'meeting' && meta.meeting_id) {
+    const mt = db.prepare('SELECT * FROM meetings WHERE id = ?').get(meta.meeting_id);
+    if (mt) out.meeting = meetingView(mt, viewerId);
+  }
   return out;
+}
+
+function taskView(t) {
+  return {
+    id: t.id, title: t.title, description: t.description, assignee_id: t.assignee_id, creator_id: t.creator_id, status: t.status,
+    priority: t.priority, due_at: t.due_at, created_at: t.created_at, updated_at: t.updated_at, done_at: t.done_at,
+    chat_id: t.chat_id, message_id: t.message_id, source_msg_id: t.source_msg_id,
+  };
+}
+function meetingView(mt, viewerId) {
+  const att = db.prepare('SELECT user_id, rsvp FROM meeting_attendees WHERE meeting_id = ?').all(mt.id);
+  return {
+    id: mt.id, chat_id: mt.chat_id, message_id: mt.message_id, title: mt.title, description: mt.description, starts_at: mt.starts_at,
+    duration_min: mt.duration_min, created_by: mt.created_by, cancelled: !!mt.cancelled,
+    attendees: att, my_rsvp: att.find((a) => a.user_id === viewerId)?.rsvp || null,
+  };
 }
 
 function messageRow(id) { return db.prepare('SELECT * FROM messages WHERE id = ?').get(int(id)); }
 
 function unreadCount(chatId, uid, lastRead) {
-  return db.prepare('SELECT COUNT(*) AS n FROM messages WHERE chat_id = ? AND id > ? AND deleted = 0 AND (user_id IS NULL OR user_id <> ?)')
+  return db.prepare('SELECT COUNT(*) AS n FROM messages WHERE chat_id = ? AND id > ? AND deleted = 0 AND thread_id IS NULL AND (user_id IS NULL OR user_id <> ?)')
     .get(chatId, lastRead, uid).n;
 }
 function mentionCount(chatId, uid, lastRead) {
@@ -229,15 +267,15 @@ function getMessages(chatId, uid, q = {}) {
   let rows;
   if (q.around) {
     const a = int(q.around);
-    const before = db.prepare('SELECT * FROM messages WHERE chat_id = ? AND id < ? AND deleted = 0 ORDER BY id DESC LIMIT ?').all(chat.id, a, Math.floor(limit / 2));
-    const after = db.prepare('SELECT * FROM messages WHERE chat_id = ? AND id >= ? AND deleted = 0 ORDER BY id ASC LIMIT ?').all(chat.id, a, Math.ceil(limit / 2));
+    const before = db.prepare('SELECT * FROM messages WHERE chat_id = ? AND id < ? AND deleted = 0 AND thread_id IS NULL ORDER BY id DESC LIMIT ?').all(chat.id, a, Math.floor(limit / 2));
+    const after = db.prepare('SELECT * FROM messages WHERE chat_id = ? AND id >= ? AND deleted = 0 AND thread_id IS NULL ORDER BY id ASC LIMIT ?').all(chat.id, a, Math.ceil(limit / 2));
     rows = [...before.reverse(), ...after];
   } else if (q.after) {
-    rows = db.prepare('SELECT * FROM messages WHERE chat_id = ? AND id > ? AND deleted = 0 ORDER BY id ASC LIMIT ?').all(chat.id, int(q.after), limit);
+    rows = db.prepare('SELECT * FROM messages WHERE chat_id = ? AND id > ? AND deleted = 0 AND thread_id IS NULL ORDER BY id ASC LIMIT ?').all(chat.id, int(q.after), limit);
   } else if (q.before) {
-    rows = db.prepare('SELECT * FROM messages WHERE chat_id = ? AND id < ? AND deleted = 0 ORDER BY id DESC LIMIT ?').all(chat.id, int(q.before), limit).reverse();
+    rows = db.prepare('SELECT * FROM messages WHERE chat_id = ? AND id < ? AND deleted = 0 AND thread_id IS NULL ORDER BY id DESC LIMIT ?').all(chat.id, int(q.before), limit).reverse();
   } else {
-    rows = db.prepare('SELECT * FROM messages WHERE chat_id = ? AND deleted = 0 ORDER BY id DESC LIMIT ?').all(chat.id, limit).reverse();
+    rows = db.prepare('SELECT * FROM messages WHERE chat_id = ? AND deleted = 0 AND thread_id IS NULL ORDER BY id DESC LIMIT ?').all(chat.id, limit).reverse();
   }
   return rows.map((m) => serializeMessage(m, uid));
 }
@@ -297,17 +335,23 @@ function postMessage(uid, chatId, opts = {}) {
     const r = messageRow(replyTo);
     if (!r || r.chat_id !== chat.id) replyTo = null;
   }
+  let threadId = opts.thread_id ? int(opts.thread_id) : null;
+  if (threadId) {
+    const root = messageRow(threadId);
+    if (!root || root.chat_id !== chat.id || root.deleted || root.thread_id || root.kind === 'system') throw new HttpError(400, 'Ветка не найдена');
+  }
   const meta = { ...(opts.meta || {}) };
   if (kind !== 'system' && body) {
     const mentions = extractMentions(body, chat.id).filter((x) => x !== uid);
-    if (mentions.length) meta.mentions = mentions;
+    if (mentions.length) meta.mentions = [...new Set([...(meta.mentions || []), ...mentions])];
   }
   const now = Date.now();
   const id = tx(() => {
-    const r = db.prepare(`INSERT INTO messages (chat_id, user_id, kind, body, file_id, reply_to, fwd_user_id, fwd_name, meta, silent, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(chat.id, opts.system && !uid ? null : uid, kind, body, fileId, replyTo,
+    const r = db.prepare(`INSERT INTO messages (chat_id, user_id, kind, thread_id, body, file_id, reply_to, fwd_user_id, fwd_name, meta, silent, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(chat.id, opts.system && !uid ? null : uid, kind, threadId, body, fileId, replyTo,
       opts.fwd_user_id || null, opts.fwd_name || '', JSON.stringify(meta), opts.silent ? 1 : 0, now);
     const mid = Number(r.lastInsertRowid);
+    if (threadId) return mid; // ответ в ветке не двигает чат и не меняет прочитанное
     touchChat(chat.id, mid, now);
     if (uid) db.prepare('UPDATE chat_members SET last_read_id = ?, manual_unread = 0, draft = CASE WHEN ? THEN draft ELSE \'\' END WHERE chat_id = ? AND user_id = ?')
       .run(mid, opts.keepDraft ? 1 : 0, chat.id, uid);
@@ -317,7 +361,43 @@ function postMessage(uid, chatId, opts = {}) {
   });
   const row = messageRow(id);
   broadcastMessage(chat, row, 'message:new');
+  if (threadId) broadcastMessage(chat, messageRow(threadId), 'message:edit'); // счётчик ответов у корня
   return serializeMessage(row, uid);
+}
+
+function getThread(uid, rootId) {
+  const root = messageRow(rootId);
+  if (!root || root.deleted) throw new HttpError(404, 'Сообщение не найдено');
+  requireMember(root.chat_id, uid);
+  const replies = db.prepare('SELECT * FROM messages WHERE thread_id = ? AND deleted = 0 ORDER BY id LIMIT 500').all(root.id);
+  return { root: serializeMessage(root, uid), replies: replies.map((m) => serializeMessage(m, uid)) };
+}
+
+function ack(uid, msgId) {
+  const m = messageRow(msgId);
+  if (!m || m.deleted) throw new HttpError(404, 'Сообщение не найдено');
+  const { chat } = requireMember(m.chat_id, uid);
+  if (!jsonParse(m.meta, {}).ack_required) throw new HttpError(400, 'Подтверждение не требуется');
+  db.prepare('INSERT OR IGNORE INTO message_acks (message_id, user_id, created_at) VALUES (?, ?, ?)').run(m.id, uid, Date.now());
+  broadcastMessage(chat, messageRow(m.id), 'message:edit');
+  return serializeMessage(messageRow(m.id), uid);
+}
+
+function ackList(uid, msgId) {
+  const m = messageRow(msgId);
+  if (!m) throw new HttpError(404, 'Сообщение не найдено');
+  requireMember(m.chat_id, uid);
+  const acked = new Map(db.prepare('SELECT user_id, created_at FROM message_acks WHERE message_id = ?').all(m.id).map((r) => [r.user_id, r.created_at]));
+  return db.prepare('SELECT u.* FROM chat_members cm JOIN users u ON u.id = cm.user_id WHERE cm.chat_id = ? AND u.is_bot = 0 AND u.id <> ? ORDER BY u.name')
+    .all(m.chat_id, m.user_id || 0).map((u) => ({ ...publicUser(u, uid), acked_at: acked.get(u.id) || null }));
+}
+
+/** Объявления «обязательно к ознакомлению», которые я ещё не подтвердил. */
+function pendingAcks(uid) {
+  return db.prepare(`SELECT m.* FROM messages m JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = ?
+    WHERE m.deleted = 0 AND json_extract(m.meta, '$.ack_required') = 1 AND (m.user_id IS NULL OR m.user_id <> ?)
+    AND NOT EXISTS (SELECT 1 FROM message_acks a WHERE a.message_id = m.id AND a.user_id = ?) ORDER BY m.id DESC LIMIT 50`)
+    .all(uid, uid, uid).map((m) => serializeMessage(m, uid));
 }
 
 function broadcastMessage(chat, row, type) {
@@ -328,7 +408,15 @@ function broadcastMessage(chat, row, type) {
 
 function sendMessage(uid, chatId, b) {
   const kind = ['text', 'file', 'image', 'video', 'voice'].includes(b.kind) ? b.kind : 'text';
-  return postMessage(uid, chatId, { body: b.body, kind, file_id: b.file_id, reply_to: b.reply_to, silent: !!b.silent });
+  const meta = {};
+  if (kind === 'video' && b.round) meta.round = true; // видео-кружок
+  if (b.ack_required) {
+    // «Обязательно к ознакомлению» — только администраторы групп и каналов
+    const { chat, m } = requireMember(chatId, uid);
+    if (!['group', 'channel'].includes(chat.type) || !isChatAdmin(m)) throw new HttpError(403, 'Только администраторы', 'forbidden');
+    meta.ack_required = true;
+  }
+  return postMessage(uid, chatId, { body: b.body, kind, file_id: b.file_id, reply_to: b.reply_to, silent: !!b.silent, thread_id: b.thread_id, meta });
 }
 
 function sendPoll(uid, chatId, b) {
@@ -718,7 +806,7 @@ function fileAccessible(fileId, uid) {
 }
 
 module.exports = {
-  REACTIONS, publicUser, userById, userSettings, aiBotId, ensureSaved, ensureAi, getOrCreateDirect,
+  REACTIONS, publicUser, taskView, meetingView, getThread, ack, ackList, pendingAcks, userById, userSettings, aiBotId, ensureSaved, ensureAi, getOrCreateDirect,
   membership, requireMember, isChatAdmin, canPost, memberIds, serializeMessage, serializeChat, messageRow,
   listChats, chatDetails, getMessages, chatMedia, postMessage, sendMessage, sendPoll, systemMessage,
   editMessage, deleteMessage, react, vote, closePoll, pinMessage, forward, markRead, updateMembership,
