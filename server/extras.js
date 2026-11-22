@@ -126,7 +126,7 @@ function requireAdmin(user) {
 }
 
 function adminUsers() {
-  return db.prepare(`SELECT id, login, name, email, phone, position, department, role, active, is_bot, gobsek_id, created_at, last_seen,
+  return db.prepare(`SELECT id, login, name, email, phone, position, department, manager_id, birthday, role, active, is_bot, gobsek_id, created_at, last_seen,
     (SELECT MAX(last_used) FROM sessions s WHERE s.user_id = users.id) AS last_active
     FROM users WHERE is_bot = 0 ORDER BY active DESC, name`).all().map((u) => ({ ...u, online: rt.isOnline(u.id) }));
 }
@@ -153,6 +153,8 @@ function createUser(admin, b) {
   const id = Number(r.lastInsertRowid);
   logEvent(admin.id, 'user_create', { id, login });
   autoJoinDefault(id);
+  if (b.manager_id) db.prepare('UPDATE users SET manager_id = ? WHERE id = ?').run(int(b.manager_id), id);
+  require('./org').syncUser(id);
   return { id, login, password };
 }
 
@@ -167,6 +169,11 @@ function updateUser(admin, id, b) {
     if (u.id === admin.id && b.role !== 'admin') throw new HttpError(400, 'Нельзя снять права с себя');
     sets.push('role = ?'); vals.push(b.role === 'admin' ? 'admin' : 'member');
   }
+  if ('manager_id' in b) {
+    const mid = b.manager_id ? int(b.manager_id) : null;
+    if (mid === u.id) throw new HttpError(400, 'Сотрудник не может быть своим руководителем');
+    sets.push('manager_id = ?'); vals.push(mid);
+  }
   if ('active' in b) {
     if (u.id === admin.id && !b.active) throw new HttpError(400, 'Нельзя отключить себя');
     sets.push('active = ?'); vals.push(b.active ? 1 : 0);
@@ -177,6 +184,7 @@ function updateUser(admin, id, b) {
     rt.kickUser(u.id);
   }
   logEvent(admin.id, 'user_update', { id: u.id, fields: Object.keys(b) });
+  require('./org').syncUser(u.id);
   rt.toAll({ type: 'user:update', user: chats.publicUser(chats.userById(u.id), 0) });
   return { ok: true };
 }
@@ -236,6 +244,7 @@ function register(b, req) {
   });
   logEvent(id, 'register', { invite_by: inv.created_by });
   autoJoinDefault(id);
+  require('./org').syncUser(id);
   return { user: chats.userById(id), token: auth.createSession(id, req) };
 }
 

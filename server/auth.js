@@ -185,6 +185,7 @@ function ssoLogin(token, req) {
   }
   if (!u.active) throw new HttpError(403, 'Учётная запись отключена', 'disabled');
   logEvent(u.id, 'sso_login', clientIp(req));
+  try { require('./org').syncUser(u.id); } catch { /* оргструктура необязательна */ }
   return { user: u, token: createSession(u.id, req) };
 }
 

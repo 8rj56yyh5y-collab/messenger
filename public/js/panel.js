@@ -9,6 +9,7 @@ import { startCall } from './call.js';
 import { previewText } from './messages.js';
 import * as app from './app.js';
 import { renderThread, closeThread } from './thread.js';
+import { BADGES } from './work-ui.js';
 
 let P = null; // { type, id, chatId, tab }
 
@@ -81,10 +82,26 @@ function userHtml(u) {
       ${P.chatId ? `<button class="pa-btn" data-pa="mute-chat">${icon(isMuted(S.chats.get(P.chatId)) ? 'bell' : 'bellOff')}<span>${esc(isMuted(S.chats.get(P.chatId)) ? t('chat.unmute') : t('chat.mute'))}</span></button>` : ''}
     </div>`}
     ${u.bio ? `<div class="panel-sec"><div class="bio">${md(u.bio)}</div></div>` : ''}
+    ${orgHtml(u)}
     <div class="panel-sec info-rows">${rows.map(([ic, val, label, href]) => `<div class="info-row" ${href ? '' : `data-pa="copy" data-text="${esc(val)}"`}>${icon(ic, 20)}<div>
       ${href ? `<a href="${esc(href)}">${esc(val)}</a>` : `<b>${esc(val)}</b>`}<small>${esc(label)}</small></div></div>`).join('')}</div>
     ${u.common?.length ? `<div class="panel-sec"><div class="sec-title">${esc(t('panel.common', { n: u.common.length }))}</div>${u.common.map((c) => `<div class="li-row" data-pa="open-chat" data-cid="${c.id}">${avatar(c, 40)}<div class="li-main"><b>${esc(c.title)}</b><span>${esc(t(`chat.type_${c.type}`))}</span></div></div>`).join('')}</div>` : ''}
     ${P.chatId ? mediaTabsHtml() : ''}`;
+}
+
+function orgHtml(u) {
+  const o = u.org;
+  if (!o) return '';
+  const person = (id) => S.users.get(id) || { id, name: '…' };
+  const mgr = o.manager ? person(o.manager) : null;
+  const got = Object.entries(o.kudos?.badges || {}).sort((a, b) => b[1] - a[1]);
+  if (!o.department && !mgr && !o.reports.length && !got.length) return '';
+  return `<div class="panel-sec org-sec">
+    ${o.department ? `<div class="om-row">${icon('briefcase', 18)}<div><b>${esc(o.department.name)}</b><span>${o.department.cfo ? `<span class="cfo-chip">${esc(o.department.cfo)}</span>` : esc(t('profile.department'))}</span></div></div>` : ''}
+    ${mgr ? `<div class="om-row" data-pa="member-user" data-uid="${mgr.id}">${avatar(mgr, 34)}<div><b>${esc(mgr.name)}</b><span>${esc(t('me.manager'))}</span></div></div>` : ''}
+    ${o.reports.length ? `<div class="om-team"><span class="muted small">${esc(t('me.team', { n: o.reports.length }))}</span><div class="avs">${o.reports.slice(0, 10).map((id) => `<button data-pa="member-user" data-uid="${id}" title="${esc(person(id).name)}">${avatar(person(id), 30)}</button>`).join('')}</div></div>` : ''}
+    ${got.length ? `<div class="mini-badges">${got.map(([b, n]) => `<span title="${esc(t(`badge.${b}`))}">${BADGES[b] || '🎉'}${n > 1 ? `<i>${n}</i>` : ''}</span>`).join('')}</div>` : ''}
+  </div>`;
 }
 
 function chatHtml(c) {
@@ -160,6 +177,7 @@ async function onClick(e) {
     case 'leave': if (chat) app.leaveChat(chat); break;
     case 'copy': copyText(a.dataset.text).then(() => toast(t('msg.copied'))); break;
     case 'open-chat': app.openChatById(Number(a.dataset.cid)); break;
+    case 'member-user': openPanel({ type: 'user', id: Number(a.dataset.uid) }); break;
     case 'tab': P.tab = a.dataset.tab; document.querySelectorAll('#panel .tab').forEach((x) => x.classList.toggle('on', x.dataset.tab === P.tab)); loadTab(); break;
     case 'view': app.viewMedia(Number(a.dataset.cid), Number(a.dataset.mid)); break;
     case 'jump': if (!e.target.closest('a')) app.openChatById(Number(a.dataset.cid), { jumpTo: Number(a.dataset.mid) }); break;

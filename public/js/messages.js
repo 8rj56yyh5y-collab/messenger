@@ -263,7 +263,7 @@ function approvalCardHtml(m) {
   return `<div class="wcard approval-card ap-${a.status}">
     <div class="wc-head"><span class="wc-kind">${icon('briefcase', 14)} ${esc(t('appr.short'))}</span><span class="status-chip ap-${a.status}">${statusIc} ${esc(t(`appr.st_${a.status}`))}</span></div>
     <div class="wc-title">${esc(a.title)}</div>
-    ${a.amount != null ? `<div class="ap-amount">${esc(fmtMoney(a.amount, a.currency))}</div>` : ''}
+    ${a.amount != null ? `<div class="ap-amount">${esc(fmtMoney(a.amount, a.currency))}</div>` : ''}${a.cfo ? `<span class="cfo-chip">${esc(a.cfo)}</span>` : ''}
     ${a.description ? `<div class="wc-desc">${md(a.description)}</div>` : ''}
     <div class="ap-list">${(a.approvers || []).map((id) => {
       const d = a.decisions?.[id];

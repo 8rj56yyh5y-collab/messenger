@@ -6,7 +6,7 @@ import { icon } from './icons.js';
 import { get, post, patch, del } from './api.js';
 import { modal, toast, confirmDialog } from './dialogs.js';
 
-const TABS = [['stats', 'chart'], ['users', 'users'], ['invites', 'link'], ['integr', 'hook'], ['audit', 'list']];
+const TABS = [['stats', 'chart'], ['users', 'users'], ['depts', 'briefcase'], ['invites', 'link'], ['integr', 'hook'], ['audit', 'list']];
 
 export function openAdmin(tab = 'stats') {
   const m = modal({ title: t('side.admin'), wide: true, content: '' });
@@ -29,6 +29,50 @@ function credentialsBox(login, password) {
 }
 
 const VIEWS = {
+  async depts(el, redraw) {
+    const o = await get('/api/org');
+    const deps = o.departments.filter((d) => d.id);
+    const loose = o.departments.filter((d) => !d.id);
+    const name = (id) => (id ? S.users.get(id)?.name || '…' : '—');
+    el.innerHTML = `<p class="muted">${esc(t('dept.hint'))}</p>
+      <div class="row"><button class="btn" data-a="new">${icon('plus', 16)} ${esc(t('dept.new'))}</button></div>
+      <div class="table-wrap"><table class="table"><thead><tr><th>${esc(t('dept.name'))}</th><th>ЦФО</th><th>${esc(t('people.head'))}</th><th>${esc(t('dept.parent'))}</th><th>${esc(t('people.n_people', { n: '' }).trim())}</th><th></th></tr></thead>
+      <tbody>${deps.map((d) => `<tr><td><b>${esc(d.name)}</b>${d.chat_id ? ` ${icon('chat', 13)}` : ''}</td><td class="mono">${esc(d.cfo || '')}</td><td>${esc(name(d.head_id))}</td>
+        <td>${esc(deps.find((x) => x.id === d.parent_id)?.name || '—')}</td><td>${d.members.length}</td><td class="right"><button class="icon-btn ghost" data-edit="${d.id}">${icon('edit', 18)}</button></td></tr>`).join('')}
+      ${loose.map((d) => `<tr class="inactive"><td>${esc(d.name)}</td><td colspan="3" class="muted small">${esc(t('dept.not_created'))}</td><td>${d.members.length}</td><td class="right"><button class="btn sm soft" data-adopt="${esc(d.name)}">${esc(t('common.create'))}</button></td></tr>`).join('')}</tbody></table></div>`;
+    const form = (d) => {
+      const users = [...S.users.values()].filter((x) => !x.is_bot).sort((a, b) => a.name.localeCompare(b.name));
+      const m = modal({
+        title: d?.id ? d.name : t('dept.new'), cls: 'small',
+        content: `<label class="field"><span>${esc(t('dept.name'))}</span><input class="input" id="dp-name" value="${esc(d?.name || '')}" autofocus></label>
+          <label class="field"><span>${esc(t('dept.cfo'))}</span><input class="input" id="dp-cfo" value="${esc(d?.cfo || '')}" placeholder="ЦФО-07"></label>
+          <label class="field"><span>${esc(t('people.head'))}</span><select class="input" id="dp-head"><option value="">—</option>${users.map((x) => `<option value="${x.id}" ${d?.head_id === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
+          <label class="field"><span>${esc(t('dept.parent'))}</span><select class="input" id="dp-parent"><option value="">—</option>${deps.filter((x) => x.id !== d?.id).map((x) => `<option value="${x.id}" ${d?.parent_id === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
+          ${d?.chat_id ? '' : `<label class="check"><input type="checkbox" id="dp-chat" ${d?.id ? '' : 'checked'}> ${esc(t('dept.with_chat'))}</label>`}
+          <div class="modal-actions">${d?.id ? `<button class="btn danger" data-a="del">${esc(t('common.delete'))}</button><span class="grow"></span>` : ''}<button class="btn soft" data-a="no">${esc(t('common.cancel'))}</button><button class="btn" data-a="yes">${esc(t('common.save'))}</button></div>`,
+      });
+      m.body.addEventListener('click', async (e) => {
+        const a = e.target.closest('[data-a]');
+        if (!a) return;
+        if (a.dataset.a === 'no') { m.close(); return; }
+        try {
+          if (a.dataset.a === 'del') { if (!(await confirmDialog(t('dept.del_q', { name: d.name }), { danger: true }))) return; await del(`/api/admin/departments/${d.id}`); }
+          if (a.dataset.a === 'yes') {
+            const body = { name: m.body.querySelector('#dp-name').value, cfo: m.body.querySelector('#dp-cfo').value, head_id: Number(m.body.querySelector('#dp-head').value) || null,
+              parent_id: Number(m.body.querySelector('#dp-parent').value) || null, create_chat: !!m.body.querySelector('#dp-chat')?.checked };
+            if (d?.id) await patch(`/api/admin/departments/${d.id}`, body); else await post('/api/admin/departments', body);
+          }
+          m.close();
+          redraw();
+        } catch (err) { toast(errText(err), { type: 'error' }); }
+      });
+    };
+    el.querySelector('[data-a=new]').onclick = () => form(null);
+    el.querySelectorAll('[data-edit]').forEach((b) => { b.onclick = () => form(deps.find((x) => x.id === Number(b.dataset.edit))); });
+    el.querySelectorAll('[data-adopt]').forEach((b) => { b.onclick = () => form({ name: b.dataset.adopt }); });
+  },
+
+
   async stats(el) {
     const s = await get('/api/admin/stats');
     const max = Math.max(1, ...s.per_day.map((d) => d.n));
@@ -111,7 +155,8 @@ function userForm(u, redraw) {
       <label class="field"><span>${esc(t('profile.name'))}</span><input class="input" id="uf-name" value="${esc(u?.name || '')}" required></label>
       <label class="field"><span>${esc(t('auth.login'))}</span><input class="input" id="uf-login" value="${esc(u?.login || '')}" ${isNew ? '' : 'disabled'} placeholder="ivan.petrenko"></label>
       <label class="field"><span>${esc(t('profile.position'))}</span><input class="input" id="uf-pos" value="${esc(u?.position || '')}"></label>
-      <label class="field"><span>${esc(t('profile.department'))}</span><input class="input" id="uf-dep" value="${esc(u?.department || '')}"></label>
+      <label class="field"><span>${esc(t('profile.department'))}</span><input class="input" id="uf-dep" list="dep-list" value="${esc(u?.department || '')}"><datalist id="dep-list"></datalist></label>
+      <label class="field"><span>${esc(t('me.manager'))}</span><select class="input" id="uf-mgr"><option value="">${esc(t('admin.mgr_auto'))}</option>${[...S.users.values()].filter((x) => !x.is_bot && x.id !== u?.id).sort((a, b) => a.name.localeCompare(b.name)).map((x) => `<option value="${x.id}" ${u?.manager_id === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
       <label class="field"><span>E-mail</span><input class="input" id="uf-email" value="${esc(u?.email || '')}"></label>
       <label class="field"><span>${esc(t('profile.phone'))}</span><input class="input" id="uf-phone" value="${esc(u?.phone || '')}"></label></div>
       <label class="check"><input type="checkbox" id="uf-admin" ${u?.role === 'admin' ? 'checked' : ''}> ${esc(t('admin.is_admin'))}</label>
@@ -121,6 +166,7 @@ function userForm(u, redraw) {
   });
   const b = m.body;
   const val = (id) => b.querySelector(id).value;
+  get('/api/org').then((o) => { const dl = b.querySelector('#dep-list'); if (dl) dl.innerHTML = o.departments.map((d) => `<option value="${esc(d.name)}">`).join(''); }).catch(() => {});
   b.querySelector('[data-a=no]').onclick = () => m.close();
   b.querySelector('[data-a=reset]')?.addEventListener('click', async () => {
     if (!(await confirmDialog(t('admin.reset_q', { name: u.name })))) return;
@@ -128,7 +174,7 @@ function userForm(u, redraw) {
     credentialsBox(r.login, r.password);
   });
   b.querySelector('[data-a=yes]').onclick = async () => {
-    const body = { name: val('#uf-name'), position: val('#uf-pos'), department: val('#uf-dep'), email: val('#uf-email'), phone: val('#uf-phone'), role: b.querySelector('#uf-admin').checked ? 'admin' : 'member' };
+    const body = { name: val('#uf-name'), position: val('#uf-pos'), department: val('#uf-dep'), email: val('#uf-email'), phone: val('#uf-phone'), role: b.querySelector('#uf-admin').checked ? 'admin' : 'member', manager_id: Number(val('#uf-mgr')) || null };
     try {
       if (isNew) {
         const r = await post('/api/admin/users', { ...body, login: val('#uf-login') });

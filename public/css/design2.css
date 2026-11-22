@@ -456,3 +456,16 @@ body:not([data-section="chats"]).panel-open .layout { grid-template-columns: var
 .integ-row b { display: block; } .integ-row span { color: var(--muted); font-size: .86em; }
 .integ-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--faint); margin-top: 6px; flex: none; }
 .integ-dot.on { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 20%, transparent); }
+
+/* Запись голосового: кнопка отправки остаётся на месте на любом экране */
+.compose-row { min-width: 0; }
+.rec-box { flex: 1 1 auto; min-width: 0; gap: 8px; padding: 0 12px 0 4px; height: 52px; border-radius: 26px; background: var(--glass-strong);
+  backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6); box-shadow: 0 8px 28px -10px rgba(15, 23, 42, .25), 0 0 0 1px var(--island-line); overflow: hidden; }
+.rec-box .rec-cancel { color: var(--danger); flex: none; }
+.rec-time { flex: none; min-width: 38px; }
+.rec-bars { flex: 1 1 0; min-width: 0; }
+.rec-bars i { background: var(--grad); }
+.send-btn { flex: none; }
+.send-btn.recording { position: relative; background: linear-gradient(135deg, #ff5f6d, #ff3b5c); box-shadow: 0 8px 20px -6px rgba(255, 59, 92, .6); }
+.send-btn.recording::after { content: ""; position: absolute; inset: -6px; border-radius: 50%; border: 2px solid rgba(255, 59, 92, .45); animation: recPulse 1.4s ease-out infinite; }
+@keyframes recPulse { from { transform: scale(.9); opacity: 1; } to { transform: scale(1.35); opacity: 0; } }

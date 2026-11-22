@@ -9,6 +9,7 @@ const auth = require('./auth');
 const chats = require('./chats');
 const extras = require('./extras');
 const work = require('./work');
+const org = require('./org');
 
 const PASSWORD = process.env.DEMO_PASSWORD || 'demo1234';
 const fake = { headers: {}, socket: {} };
@@ -84,6 +85,19 @@ function seed() {
   say(ids.serhii, dm2.id, 'Екструдер на лінії 2 знову зупинився, викликав сервіс.');
   say(admin.id, dm2.id, 'Тримай в курсі. Якщо до вечора не запустять — переводимо замовлення на лінію 1.');
   say(ids.serhii, dm2.id, 'Зрозумів 👌');
+
+  // ----- Оргструктура: подразделения с руководителями и ЦФО -----
+  const mk = (name, head, cfo, parent, chat = false) => org.createDepartment(admin, { name, head_id: head, cfo, parent_id: parent, create_chat: chat });
+  const dTop = mk('Керівництво', admin.id, 'ЦФО-01', null);
+  const dFin = mk('Фінанси', ids.olena, 'ЦФО-02', dTop.id);
+  mk('Бухгалтерія', ids.ivan, 'ЦФО-03', dFin.id, true);
+  const dSales = mk('Продажі', ids.dmytro, 'ЦФО-04', dTop.id);
+  mk('Логістика', ids.andrii, 'ЦФО-06', dSales.id);
+  mk('Виробництво', ids.serhii, 'ЦФО-05', dTop.id, true);
+  mk('Кадри', ids.natalia, 'ЦФО-08', dTop.id);
+  mk('Юридичний відділ', ids.yulia, 'ЦФО-09', dTop.id);
+  db.prepare('UPDATE users SET manager_id = ? WHERE id IN (?, ?, ?, ?, ?)').run(admin.id, ids.olena, ids.dmytro, ids.serhii, ids.natalia, ids.yulia);
+  db.prepare('UPDATE users SET manager_id = ? WHERE id = ?').run(ids.olena, ids.ivan);
 
   // ----- Рабочие инструменты: задачи, погодження, подяки, встречи, ознакомление, ветки, дни рождения -----
   const day = 86400e3;

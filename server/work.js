@@ -37,7 +37,7 @@ function chatLabel(c, uid) {
 /** Сотрудник для внешних систем: Gobsek сопоставляет по gobsek_id или логину. */
 function personRef(id) {
   const u = id ? chats.userById(id) : null;
-  return u ? { id: u.id, login: u.login, name: u.name, gobsek_id: u.gobsek_id || null } : null;
+  return u ? { id: u.id, login: u.login, name: u.name, gobsek_id: u.gobsek_id || null, department: u.department || '' } : null;
 }
 function emitWork(event, data) { rt.emit('work', { event, data }); }
 
@@ -154,6 +154,7 @@ function createApproval(uid, chatId, b) {
   const meta = {
     title, amount, currency: str(b.currency, 6) || 'UAH', description: str(b.description, 2000), approvers,
     decisions: {}, status: 'pending', mode: b.mode === 'any' ? 'any' : 'all', due_at: b.due_at ? int(b.due_at) : null,
+    cfo: str(b.cfo, 30),
   };
   const msg = chats.postMessage(uid, chat.id, { kind: 'approval', body: title, meta: { ...meta, mentions: approvers } });
   emitWork('approval.created', { message_id: msg.id, chat_id: chat.id, ...meta, author: personRef(uid), approvers: approvers.map(personRef) });

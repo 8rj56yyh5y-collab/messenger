@@ -14,6 +14,7 @@ const ai = require('./ai');
 const work = require('./work');
 const push = require('./push');
 const outbox = require('./outbox');
+const org = require('./org');
 const rt = require('./realtime');
 const { acceptUpgrade, Hub } = require('./ws');
 const pkg = require('../package.json');
@@ -128,6 +129,7 @@ route('PATCH', '/api/me', async (req, res, p, u) => {
   }
   if (sets.length) db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...vals, u.id);
   const fresh = chats.userById(u.id);
+  if ('department' in b) org.syncUser(u.id);
   rt.toAll({ type: 'user:update', user: chats.publicUser(fresh, 0) });
   return { user: meUser(fresh) };
 });
@@ -157,8 +159,15 @@ route('GET', '/api/users/:id', (req, res, p, u) => {
   if (!x) throw new HttpError(404, 'Не найден');
   const common = db.prepare(`SELECT c.* FROM chats c JOIN chat_members a ON a.chat_id = c.id AND a.user_id = ?
     JOIN chat_members b ON b.chat_id = c.id AND b.user_id = ? WHERE c.type IN ('group','channel') ORDER BY c.updated_at DESC LIMIT 30`).all(u.id, x.id);
-  return { ...chats.publicUser(x, u.id), common: common.map((c) => ({ id: c.id, title: c.title, type: c.type, color: c.color, avatar: c.avatar_file ? `/api/files/${c.avatar_file}` : null })) };
+  return { ...chats.publicUser(x, u.id), common: common.map((c) => ({ id: c.id, title: c.title, type: c.type, color: c.color, avatar: c.avatar_file ? `/api/files/${c.avatar_file}` : null })), org: org.profile(x.id, u.id) };
 });
+
+// --- Оргструктура и профиль ---
+route('GET', '/api/org', (req, res, p, u) => org.orgView(u.id));
+route('GET', '/api/me/profile', (req, res, p, u) => org.profile(u.id, u.id));
+route('POST', '/api/admin/departments', async (req, res, p, u) => { extras.requireAdmin(u); return org.createDepartment(u, await readJson(req)); });
+route('PATCH', '/api/admin/departments/:id', async (req, res, p, u) => { extras.requireAdmin(u); return org.updateDepartment(u, p.id, await readJson(req)); });
+route('DELETE', '/api/admin/departments/:id', (req, res, p, u) => { extras.requireAdmin(u); return org.deleteDepartment(u, p.id); });
 
 // --- Чаты ---
 route('GET', '/api/chats', (req, res, p, u) => ({ chats: chats.listChats(u.id), calls: calls.activeCallsFor(u.id), online: rt.onlineIds() }));

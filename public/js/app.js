@@ -175,7 +175,7 @@ export function navigate(hash) {
   if (location.hash === `#${hash}` || (!hash && !location.hash)) { route(); return; }
   location.hash = hash;
 }
-const SECTIONS = ['pulse', 'tasks', 'calendar', 'calls', 'people'];
+const SECTIONS = ['pulse', 'tasks', 'calendar', 'calls', 'people', 'me'];
 function setSection(name) {
   S.section = name;
   document.body.dataset.section = name;
@@ -185,7 +185,7 @@ function route() {
   const h = location.hash;
   const join = hashParam('join');
   if (join) { history.replaceState(null, '', '#'); joinByCode(join); return; }
-  const sec = /^#\/(pulse|tasks|calendar|calls|people)$/.exec(h);
+  const sec = /^#\/(pulse|tasks|calendar|calls|people|me)$/.exec(h);
   if (sec && SECTIONS.includes(sec[1])) {
     if (S.current) closeChat();
     closePanel();
@@ -208,7 +208,7 @@ function route() {
 // ---------- Навигационная рельса ----------
 const RAIL = [
   ['chats', 'chat', 'nav.chats'], ['pulse', 'activity', 'nav.pulse'], ['tasks', 'kanban', 'nav.tasks'],
-  ['calendar', 'calendar', 'nav.calendar'], ['calls', 'phone', 'nav.calls'], ['people', 'users', 'nav.people'],
+  ['calendar', 'calendar', 'nav.calendar'], ['calls', 'phone', 'nav.calls'], ['people', 'users', 'nav.people'], ['me', 'user', 'nav.me'],
 ];
 function railHtml() {
   return `<button class="rail-logo" data-rail="drawer" title="${esc(S.meta.name)}">${icon('send', 22)}</button>
@@ -216,7 +216,7 @@ function railHtml() {
     <span class="grow"></span>
     <button class="rail-item rail-extra" data-rail="ai" title="Gobsek AI">${icon('sparkles', 22)}<span>AI</span></button>
     <button class="rail-item rail-extra" data-rail="settings" title="${esc(t('side.settings'))}">${icon('settings', 22)}<span>${esc(t('nav.settings'))}</span></button>
-    <button class="rail-me" data-rail="drawer">${avatar(S.me, 40)}<i class="st-dot st-${S.me.status || 'available'}"></i></button>`;
+    <button class="rail-me" data-nav="me" title="${esc(t('nav.me'))}">${avatar(S.me, 40)}<i class="st-dot st-${S.me.status || 'available'}"></i></button>`;
 }
 function onRailClick(e) {
   const nav = e.target.closest('[data-nav]');
@@ -261,6 +261,27 @@ on('tasks:changed', refreshBadges);
 on('acks:changed', refreshBadges);
 on('chat:opened', (id) => { if (id) S.lastChat = id; });
 export function openAdminInvites() { openAdmin('invites'); }
+export function openAdminTab(tab) { openAdmin(tab); }
+export function openSettingsSection(sec) { openSettings(sec); }
+export function profileGo(k) {
+  switch (k) {
+    case 'saved': openDirect(S.me.id); break;
+    case 'ai': openAi(); break;
+    case 'people': navigate('/people'); break;
+    case 'calls': navigate('/calls'); break;
+    case 'settings': openSettings(); break;
+    case 'help': openHelp(); break;
+    case 'admin': openAdmin(); break;
+    case 'logout': logout(); break;
+    default:
+  }
+}
+// Обновить аватар и статус в рельсе, когда я их меняю
+on('user:updated', (id) => {
+  if (id !== S.me.id) return;
+  const me2 = $('#rail .rail-me');
+  if (me2) me2.innerHTML = `${avatar(S.me, 40)}<i class="st-dot st-${S.me.status || 'available'}"></i>`;
+});
 let jump = null;
 function pendingJump(id) {
   if (jump && jump.chatId === id) { const j = jump; jump = null; return { jumpTo: j.jumpTo }; }

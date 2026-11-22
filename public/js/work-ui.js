@@ -97,13 +97,18 @@ export async function setTaskStatus(id, status) {
 // ---------- Погодження ----------
 export async function approvalDialog(chatId) {
   const people = (await membersOf(chatId)).filter((u) => u.id !== S.me.id);
+  const [org, prof] = await Promise.all([get('/api/org').catch(() => ({ departments: [] })), get('/api/me/profile').catch(() => ({}))]);
+  const cfos = org.departments.filter((d) => d.cfo);
+  const myCfo = prof.department?.cfo || '';
+  const preset = prof.manager && people.some((u) => u.id === prof.manager) ? [prof.manager] : [];
   const m = modal({
     title: t('appr.new'),
     content: `<label class="field"><span>${esc(t('appr.subject'))}</span><input class="input" id="ap-title" maxlength="200" autofocus placeholder="${esc(t('appr.subject_ph'))}"></label>
       <div class="grid-amount"><label class="field"><span>${esc(t('appr.amount'))}</span><input class="input" id="ap-amount" type="number" min="0" step="0.01" placeholder="0.00"></label>
       <label class="field"><span>${esc(t('appr.currency'))}</span><select class="input" id="ap-cur"><option>UAH</option><option>USD</option><option>EUR</option><option>PLN</option></select></label></div>
+      ${cfos.length ? `<label class="field"><span>ЦФО</span><select class="input" id="ap-cfo"><option value="">—</option>${cfos.map((d) => `<option value="${esc(d.cfo)}" ${d.cfo === myCfo ? 'selected' : ''}>${esc(d.cfo)} · ${esc(d.name)}</option>`).join('')}</select></label>` : ''}
       <label class="field"><span>${esc(t('appr.details'))}</span><textarea class="input" id="ap-desc" rows="3" maxlength="2000" placeholder="${esc(t('appr.details_ph'))}"></textarea></label>
-      <div class="field"><span>${esc(t('appr.approvers'))}</span>${people.length ? peoplePicker(people, [], { name: 'ap-who' }) : `<p class="muted small">${esc(t('appr.no_people'))}</p>`}</div>
+      <div class="field"><span>${esc(t('appr.approvers'))}</span>${people.length ? peoplePicker(people, preset, { name: 'ap-who' }) : `<p class="muted small">${esc(t('appr.no_people'))}</p>`}</div>
       <div class="seg" id="ap-mode"><button class="on" data-mode="all">${esc(t('appr.mode_all'))}</button><button data-mode="any">${esc(t('appr.mode_any'))}</button></div>
       <div class="modal-actions"><button class="btn soft" data-a="no">${esc(t('common.cancel'))}</button><button class="btn" data-a="yes">${esc(t('appr.send'))}</button></div>`,
   });
@@ -115,7 +120,7 @@ export async function approvalDialog(chatId) {
     try {
       await post(`/api/chats/${chatId}/approvals`, {
         title: b.querySelector('#ap-title').value, amount: b.querySelector('#ap-amount').value, currency: b.querySelector('#ap-cur').value,
-        description: b.querySelector('#ap-desc').value, approvers: picked(b, 'ap-who'), mode,
+        description: b.querySelector('#ap-desc').value, approvers: picked(b, 'ap-who'), mode, cfo: b.querySelector('#ap-cfo')?.value || '',
       });
       m.close();
     } catch (e) { toast(errText(e), { type: 'error' }); }

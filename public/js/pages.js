@@ -1,7 +1,7 @@
 // Разделы навигационной рельсы: Пульс компании, Задачи, Календарь, Звонки, Люди.
 import { S, on, emit, chatTitle, userName } from './store.js';
 import { t, errText, getLang } from './i18n.js';
-import { $, esc, avatar, fmtTime, fmtDateTime, fmtDuration, md, fmtLastSeen } from './util.js';
+import { $, esc, avatar, fmtTime, fmtDateTime, fmtDuration, md, fmtLastSeen, isMobile } from './util.js';
 import { icon } from './icons.js';
 import { get, post } from './api.js';
 import { toast, modal } from './dialogs.js';
@@ -102,6 +102,7 @@ const RENDER = {
     if (current !== 'tasks') return;
     const q = (S.taskQuery || '').toLowerCase();
     const shown = list.filter((tk) => tk.status !== 'cancelled' && (!q || tk.title.toLowerCase().includes(q)));
+    if (isMobile()) { S.taskCache = list; tasksMobile(shown, scope); return; }
     const cols = TASK_STATUSES.map((st) => {
       const items = shown.filter((tk) => tk.status === st).sort((a, b) => (a.due_at || Infinity) - (b.due_at || Infinity));
       return `<div class="kcol" data-col="${st}"><div class="kcol-head"><span class="kdot st-${st}"></span><b>${esc(t(`tstatus.${st}`))}</b><span class="kcount">${items.length}</span>
@@ -142,6 +143,8 @@ const RENDER = {
     const to = from + 7 * 86400e3;
     const list = await get(`/api/meetings?from=${from}&to=${to}`).catch(() => []);
     if (current !== 'calendar') return;
+    S.calCache = list;
+    if (isMobile()) { calendarMobile(list, base); return; }
     const H0 = 8;
     const H1 = 21;
     const days = [...Array(7)].map((_, i) => new Date(from + i * 86400e3));
@@ -187,6 +190,7 @@ const RENDER = {
 
   // ---------- Люди ----------
   async people() {
+    if (S.peopleView === 'org') { await orgView(); return; }
     const q = (S.peopleQuery || '').toLowerCase();
     const users = [...S.users.values()].filter((u) => !u.is_bot && u.active !== false && (!q || `${u.name} ${u.login} ${u.position} ${u.department}`.toLowerCase().includes(q)));
     const groups = new Map();
@@ -198,7 +202,7 @@ const RENDER = {
     const sorted = [...groups].sort((a, b) => a[0].localeCompare(b[0]));
     const online = users.filter((u) => S.online.has(u.id)).length;
     inner().innerHTML = `${head(esc(t('nav.people')), esc(t('people.sub', { n: users.length, online })), S.me.role === 'admin' ? `<button class="btn soft" data-pg="invite">${icon('plus', 16)} ${esc(t('admin.invite_people'))}</button>` : '')}
-      <div class="toolbar"><div class="search-box">${icon('search', 16)}<input id="people-q" placeholder="${esc(t('contacts.search'))}" value="${esc(S.peopleQuery || '')}"></div>
+      <div class="toolbar">${peopleSeg()}<div class="search-box">${icon('search', 16)}<input id="people-q" placeholder="${esc(t('contacts.search'))}" value="${esc(S.peopleQuery || '')}"></div>
         <div class="dept-chips">${sorted.map(([d, us]) => `<button class="chip-btn" data-pg="dept" data-d="${esc(d)}">${esc(d)} <small>${us.length}</small></button>`).join('')}</div></div>
       ${sorted.map(([d, us]) => `<section class="dept" data-dept="${esc(d)}"><h2>${esc(d)} <small>${us.length}</small></h2><div class="people-grid">${us.sort((a, b) => (S.online.has(b.id) - S.online.has(a.id)) || a.name.localeCompare(b.name)).map((u) => `
         <div class="pcard person" data-pg="user" data-uid="${u.id}">${avatar(u, 64, { online: S.online.has(u.id) })}
@@ -211,6 +215,139 @@ const RENDER = {
     qi.oninput = () => { S.peopleQuery = qi.value; RENDER.people(); const n = $('#people-q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); };
   },
 };
+
+// ---------- Свой профиль ----------
+RENDER.me = async function me() {
+  let p;
+  try { p = await get('/api/me/profile'); } catch (e) { inner().innerHTML = `<p class="muted center">${esc(errText(e))}</p>`; return; }
+  if (current !== 'me') return;
+  const u = S.me;
+  const person = (id) => S.users.get(id) || (id === S.me.id ? S.me : { id, name: userName(id) });
+  const mgr = p.manager ? person(p.manager) : null;
+  const statuses = ['available', 'busy', 'dnd', 'away', 'remote', 'vacation'];
+  const allBadges = Object.keys(BADGES);
+  const tiles = [
+    ['saved', 'bookmark', t('chat.saved')], ['ai', 'sparkles', 'Gobsek AI'], ['people', 'users', t('nav.people')], ['calls', 'phone', t('nav.calls')],
+    ['settings', 'settings', t('side.settings')], ['help', 'help', t('side.help')], ...(u.role === 'admin' ? [['admin', 'shield', t('side.admin')]] : []), ['logout', 'logout', t('side.logout')],
+  ];
+  inner().innerHTML = `<div class="me-hero">
+      <div class="me-cover"></div>
+      <div class="me-main">
+        <button class="me-av" data-pg="me-photo" title="${esc(t('profile.change_photo'))}">${avatar(u, 108)}<span>${icon('image', 16)}</span></button>
+        <div class="me-id"><h1>${esc(u.name)}</h1><p>${esc([u.position, u.department].filter(Boolean).join(' · ') || `@${u.login}`)}</p>
+          ${u.status_text ? `<div class="me-status-text">💬 ${esc(u.status_text)}</div>` : ''}</div>
+        <button class="btn soft" data-pg="me-edit">${icon('edit', 16)} ${esc(t('me.edit'))}</button>
+      </div>
+      <div class="me-statuses">${statuses.map((st) => `<button class="st-chip ${u.status === st ? 'on' : ''}" data-pg="me-status" data-st="${st}"><i class="st-dot st-${st}"></i>${esc(t(`status.${st}`))}</button>`).join('')}</div>
+    </div>
+    <div class="stat-strip me-stats">
+      <button class="stat" data-pg="nav" data-to="tasks"><b>${p.tasks.open}</b><span>${esc(t('pulse.s_tasks'))}</span></button>
+      <button class="stat ${p.tasks.overdue ? 'bad' : ''}" data-pg="nav" data-to="tasks"><b>${p.tasks.overdue}</b><span>${esc(t('pulse.s_overdue'))}</span></button>
+      <div class="stat"><b>${p.tasks.done_month}</b><span>${esc(t('me.done_month'))}</span></div>
+      <button class="stat" data-pg="nav" data-to="calendar"><b>${p.meetings_week}</b><span>${esc(t('me.meetings_week'))}</span></button>
+      <div class="stat"><b>${p.kudos.total}</b><span>${esc(t('me.kudos_got'))}</span></div>
+    </div>
+    <div class="pulse-grid me-grid">
+      ${card(esc(t('me.org')), `<div class="org-mini">
+        ${p.department ? `<div class="om-row">${icon('briefcase', 18)}<div><b>${esc(p.department.name)}</b><span>${p.department.cfo ? `<span class="cfo-chip">${esc(p.department.cfo)}</span>` : esc(t('profile.department'))}</span></div>
+          ${p.department.chat_id ? `<button class="btn sm soft" data-pg="open-chat" data-chat="${p.department.chat_id}">${icon('chat', 14)}</button>` : ''}</div>` : ''}
+        ${mgr ? `<div class="om-row" data-pg="user" data-uid="${mgr.id}">${avatar(mgr, 36)}<div><b>${esc(mgr.name)}</b><span>${esc(t('me.manager'))}${mgr.position ? ` · ${esc(mgr.position)}` : ''}</span></div>
+          <button class="btn sm soft" data-pg="dm" data-uid="${mgr.id}">${icon('send', 14)}</button></div>` : ''}
+        ${p.reports.length ? `<div class="om-team"><span class="muted small">${esc(t('me.team', { n: p.reports.length }))}</span><div class="avs">${p.reports.slice(0, 12).map((id) => `<button data-pg="user" data-uid="${id}" title="${esc(person(id).name)}">${avatar(person(id), 34, { online: S.online.has(id) })}</button>`).join('')}</div></div>` : ''}
+        ${!p.department && !mgr && !p.reports.length ? empty(t('me.no_org'), 'info') : ''}
+        <span class="muted small">${esc(t('me.since', { date: new Date(p.member_since).toLocaleDateString(getLang(), { day: 'numeric', month: 'long', year: 'numeric' }) }))}</span></div>`, { ic: 'users' })}
+      ${card(esc(t('me.badges')), `<div class="badge-wall">${allBadges.map((b) => `<div class="bw ${p.kudos.badges[b] ? 'got' : ''}" title="${esc(t(`badge.${b}`))}"><span>${BADGES[b]}</span><small>${esc(t(`badge.${b}`))}</small>${p.kudos.badges[b] ? `<i>${p.kudos.badges[b]}</i>` : ''}</div>`).join('')}</div>
+        ${p.kudos.last.length ? `<div class="kd-last">${p.kudos.last.map((k) => `<div class="kd-l">${BADGES[k.badge] || '🎉'}<div><b>${esc(userName(k.from))}</b><span>${esc(k.text || t(`badge.${k.badge}`))}</span></div></div>`).join('')}</div>` : ''}`, { ic: 'trophy' })}
+      ${card(esc(t('me.quick')), `<div class="me-tiles">${tiles.map(([k, ic, label]) => `<button class="me-tile ${k === 'logout' ? 'danger' : ''}" data-pg="me-go" data-go="${k}">${icon(ic, 22)}<span>${esc(label)}</span></button>`).join('')}</div>`, { ic: 'grid', cls: 'span-2' })}
+    </div>`;
+};
+
+async function setMyStatus(st) {
+  try {
+    const { user } = await (await import('./api.js')).patch('/api/me', { status: st });
+    Object.assign(S.me, user);
+    emit('presence');
+    RENDER.me();
+  } catch (e) { toast(errText(e), { type: 'error' }); }
+}
+
+// ---------- Задачи на телефоне: вкладки по статусам ----------
+function tasksMobile(shown, scope) {
+  const st = S.taskTab || 'todo';
+  const items = shown.filter((tk) => tk.status === st).sort((a, b) => (a.due_at || Infinity) - (b.due_at || Infinity));
+  const next = { todo: 'doing', doing: 'review', review: 'done' }[st];
+  inner().innerHTML = `${head(esc(t('nav.tasks')), '', `<button class="icon-btn hl-btn" data-pg="new-task">${icon('plus', 20)}</button>`)}
+    <div class="seg full">${['mine', 'created', 'all'].map((s) => `<button class="${scope === s ? 'on' : ''}" data-pg="scope" data-scope="${s}">${esc(t(`tasks.scope_${s}`))}</button>`).join('')}</div>
+    <div class="ttabs">${TASK_STATUSES.map((s) => `<button class="ttab ${st === s ? 'on' : ''}" data-pg="ttab" data-st="${s}"><i class="kdot st-${s}"></i>${esc(t(`tstatus.${s}`))}<b>${shown.filter((x) => x.status === s).length}</b></button>`).join('')}</div>
+    <div class="mtasks">${items.map((tk) => `<div class="mtask ${tk.due_at && tk.due_at < Date.now() && st !== 'done' ? 'overdue' : ''}" data-task="${tk.id}" style="--prio:${PRIORITY_COLORS[tk.priority]}">
+      <div class="mt-main"><b>${esc(tk.title)}</b><div class="mt-sub">${avatar(S.users.get(tk.assignee_id) || (tk.assignee_id === S.me.id ? S.me : { id: tk.assignee_id, name: userName(tk.assignee_id) }), 20)}
+        ${tk.chat?.title && tk.chat.type !== 'saved' ? `<span>${esc(tk.chat.title)}</span>` : ''}${dueText(tk.due_at)}</div></div>
+      ${next ? `<button class="mt-next" data-pg="task-next" data-tid="${tk.id}" data-st="${next}" title="${esc(t(`task.to_${next}`))}">${icon(next === 'done' ? 'check' : 'right', 18)}</button>` : ''}</div>`).join('') || empty(t('tasks.empty_tab'), 'check2')}</div>`;
+}
+
+// ---------- Календарь на телефоне: полоса недели + встречи дня ----------
+function calendarMobile(list, base) {
+  const days = [...Array(7)].map((_, i) => new Date(base.getTime() + i * 86400e3));
+  const todayStr = new Date().toDateString();
+  let sel = S.calDay && days.some((d) => d.toDateString() === S.calDay) ? S.calDay : (days.find((d) => d.toDateString() === todayStr) || days[0]).toDateString();
+  S.calDay = sel;
+  const evs = list.filter((m) => new Date(m.starts_at).toDateString() === sel).sort((a, b) => a.starts_at - b.starts_at);
+  const selDate = new Date(sel);
+  inner().innerHTML = `${head(esc(t('nav.calendar')), esc(selDate.toLocaleDateString(getLang(), { weekday: 'long', day: 'numeric', month: 'long' })), `<button class="icon-btn hl-btn" data-pg="new-meeting">${icon('plus', 20)}</button>`)}
+    <div class="week-strip"><button class="icon-btn ghost" data-pg="week" data-d="-1">${icon('back', 18)}</button>
+      <div class="ws-days">${days.map((d) => {
+        const has = list.filter((m) => new Date(m.starts_at).toDateString() === d.toDateString()).length;
+        return `<button class="ws-day ${d.toDateString() === sel ? 'on' : ''} ${d.toDateString() === todayStr ? 'today' : ''}" data-pg="calday" data-day="${esc(d.toDateString())}">
+          <small>${esc(d.toLocaleDateString(getLang(), { weekday: 'short' }))}</small><b>${d.getDate()}</b><i class="${has ? 'has' : ''}"></i></button>`;
+      }).join('')}</div>
+      <button class="icon-btn ghost" data-pg="week" data-d="1">${icon('right', 18)}</button></div>
+    <div class="agenda">${evs.map((m) => {
+      const end = m.starts_at + m.duration_min * 60e3;
+      const live = Date.now() > m.starts_at - 10 * 60e3 && Date.now() < end;
+      return `<button class="ag-item ${m.cancelled ? 'cancelled' : ''} ${live ? 'live' : ''} r-${m.my_rsvp}" data-pg="meeting" data-mid="${m.id}">
+        <div class="ag-time"><b>${fmtTime(m.starts_at)}</b><small>${fmtTime(end)}</small></div><div class="ag-bar"></div>
+        <div class="ag-main"><b>${esc(m.title)}</b><span>${esc(m.chat?.title || '')} · ${m.duration_min} ${esc(t('meet.min'))}</span>
+          <div class="ag-people">${m.attendees.filter((a) => a.rsvp === 'yes').slice(0, 5).map((a) => avatar(S.users.get(a.user_id) || { id: a.user_id, name: userName(a.user_id) }, 22)).join('')}</div></div>
+        ${live ? `<span class="live-tag">LIVE</span>` : m.my_rsvp === 'pending' ? `<span class="rsvp-tag">?</span>` : ''}</button>`;
+    }).join('') || empty(t('cal.day_empty'), 'calendar')}</div>`;
+}
+
+// ---------- Оргструктура ----------
+function peopleSeg() {
+  const v = S.peopleView || 'list';
+  return `<div class="seg"><button class="${v === 'list' ? 'on' : ''}" data-pg="pview" data-v="list">${icon('users', 15)} ${esc(t('people.list'))}</button><button class="${v === 'org' ? 'on' : ''}" data-pg="pview" data-v="org">${icon('grid', 15)} ${esc(t('people.org'))}</button></div>`;
+}
+async function orgView() {
+  const o = await get('/api/org').catch(() => ({ departments: [], managers: {} }));
+  if (current !== 'people') return;
+  const deps = o.departments;
+  const byParent = new Map();
+  for (const d of deps) {
+    const k = d.parent_id || 0;
+    if (!byParent.has(k)) byParent.set(k, []);
+    byParent.get(k).push(d);
+  }
+  const person = (id) => S.users.get(id) || { id, name: userName(id) };
+  const node = (d, depth) => {
+    const head2 = d.head_id ? person(d.head_id) : null;
+    const others = d.members.filter((id) => id !== d.head_id);
+    const kids = d.id ? byParent.get(d.id) || [] : [];
+    return `<div class="org-node" style="--depth:${depth}">
+      <div class="org-card">
+        <div class="oc-top"><b>${esc(d.name)}</b>${d.cfo ? `<span class="cfo-chip">${esc(d.cfo)}</span>` : ''}<span class="grow"></span>
+          ${d.chat_id ? `<button class="icon-btn ghost xs" data-pg="${d.in_chat ? 'open-chat' : 'join-dept'}" data-chat="${d.chat_id}" title="${esc(t('people.dept_chat'))}">${icon('chat', 15)}</button>` : ''}</div>
+        ${head2 ? `<div class="oc-head" data-pg="user" data-uid="${head2.id}">${avatar(head2, 40, { online: S.online.has(head2.id) })}<div><b>${esc(head2.name)}</b><span>${esc(head2.position || t('people.head'))}</span></div><span class="head-tag">${esc(t('people.head'))}</span></div>` : ''}
+        <div class="oc-members">${others.slice(0, 14).map((id) => `<button data-pg="user" data-uid="${id}" title="${esc(person(id).name)}">${avatar(person(id), 30, { online: S.online.has(id) })}</button>`).join('')}
+          ${others.length > 14 ? `<span class="more-n">+${others.length - 14}</span>` : ''}<span class="muted small">${esc(t('people.n_people', { n: d.members.length }))}</span></div>
+      </div>
+      ${kids.length ? `<div class="org-kids">${kids.map((k) => node(k, depth + 1)).join('')}</div>` : ''}
+    </div>`;
+  };
+  const roots = byParent.get(0) || [];
+  inner().innerHTML = `${head(esc(t('nav.people')), esc(t('people.org_sub', { n: deps.length })), S.me.role === 'admin' ? `<button class="btn soft" data-pg="admin-depts">${icon('settings', 16)} ${esc(t('people.manage'))}</button>` : '')}
+    <div class="toolbar">${peopleSeg()}</div>
+    <div class="org-tree">${roots.map((d) => node(d, 0)).join('') || empty(t('people.org_empty'), 'users')}</div>`;
+}
 
 function startOfWeek(d) {
   const x = new Date(d);
@@ -311,6 +448,7 @@ async function onClick(e) {
     case 'week': {
       const d = Number(a.dataset.d);
       S.calWeek = d === 0 ? startOfWeek(new Date()) : new Date((S.calWeek || startOfWeek(new Date())).getTime() + d * 7 * 86400e3);
+      S.calDay = null;
       RENDER.calendar();
       break;
     }
@@ -321,6 +459,15 @@ async function onClick(e) {
     case 'new-call': app.openContacts(); break;
     case 'dept': $(`#main [data-dept="${CSS.escape(a.dataset.d)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); break;
     case 'invite': app.openAdminInvites(); break;
+    case 'pview': S.peopleView = a.dataset.v; RENDER.people(); break;
+    case 'admin-depts': app.openAdminTab('depts'); break;
+    case 'join-dept': { try { await post('/api/chats/join', { chat_id: Number(a.dataset.chat) }); } catch { /* закрытый чат */ } app.openChatById(Number(a.dataset.chat)); break; }
+    case 'ttab': S.taskTab = a.dataset.st; RENDER.tasks(); break;
+    case 'task-next': e.stopPropagation(); await setTaskStatus(Number(a.dataset.tid), a.dataset.st); RENDER.tasks(); break;
+    case 'calday': S.calDay = a.dataset.day; RENDER.calendar(); break;
+    case 'me-status': setMyStatus(a.dataset.st); break;
+    case 'me-edit': case 'me-photo': app.openSettingsSection('profile'); break;
+    case 'me-go': app.profileGo(a.dataset.go); break;
     default:
   }
 }
@@ -332,5 +479,9 @@ on('presence', () => { if (current === 'people') RENDER.people(); });
 on('ws', (msg) => {
   if (msg.type === 'task:update' && (current === 'tasks' || current === 'pulse')) RENDER[current]();
   if (msg.type === 'approval:done' && current === 'pulse') RENDER.pulse();
+  if (msg.type === 'user:update' && current === 'me' && msg.user.id === S.me.id) RENDER.me();
 });
+// Поворот телефона / изменение ширины — перерисовать раздел под новый макет
+let lastMobile = isMobile();
+window.addEventListener('resize', () => { const m = isMobile(); if (m !== lastMobile && current) { lastMobile = m; RENDER[current]?.(); } });
 export { emit };

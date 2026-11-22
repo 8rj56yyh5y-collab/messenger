@@ -808,9 +808,9 @@ async function startRecording() {
   } catch { toast(t('call.no_mic'), { type: 'error' }); return; }
   V.recorder = rec;
   V.savedRow = box.innerHTML;
-  box.innerHTML = `<div class="rec-box"><span class="rec-dot"></span><span class="rec-time">0:00</span><div class="rec-bars"></div>
-    <button class="btn soft sm" data-action="rec-cancel">${esc(t('common.cancel'))}</button></div>
-    <button class="send-btn" data-action="rec-send">${icon('send', 22)}</button>`;
+  box.innerHTML = `<div class="rec-box"><button class="icon-btn ghost rec-cancel" data-action="rec-cancel" title="${esc(t('common.cancel'))}">${icon('trash', 20)}</button>
+    <span class="rec-dot"></span><span class="rec-time">0:00</span><div class="rec-bars"></div></div>
+    <button class="send-btn recording" data-action="rec-send" aria-label="${esc(t('compose.send'))}">${icon('send', 22)}</button>`;
 }
 async function stopRecording(send) {
   if (!V || !V.recorder) return;
