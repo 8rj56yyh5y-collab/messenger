@@ -40,6 +40,13 @@ services:
         sync: false
       - key: GOBSEK_URL
         sync: false
+      # События в Gobsek и push (необязательно):
+      - key: GOBSEK_EVENTS_URL
+        sync: false
+      - key: GOBSEK_EVENTS_SECRET
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false
       # TURN для звонков из закрытых сетей (необязательно):
       - key: TURN_URLS
         sync: false

@@ -5,6 +5,7 @@ import { $, esc, avatar, fmtDateTime, setTimeFormat } from './util.js';
 import { icon } from './icons.js';
 import { get, patch, post, del, upload } from './api.js';
 import { modal, toast, confirmDialog } from './dialogs.js';
+import { pushSupported, pushState, enablePush, disablePush } from './push.js';
 
 const ACCENTS = {
   blue: ['#3390ec', '#8774e1'], violet: ['#8774e1', '#c86bd6'], green: ['#4fae4e', '#2fa3a0'], lime: ['#86b300', '#3d9a50'],
@@ -174,12 +175,35 @@ const RENDER = {
     el.innerHTML = `<h2>${esc(t('settings.notifications'))}</h2>
       ${perm !== 'granted' ? `<div class="note">${icon('bell', 18)}<div>${esc(perm === 'denied' ? t('notify.denied') : perm === 'unsupported' ? t('notify.unsupported') : t('notify.ask'))}
         ${perm === 'default' ? `<button class="btn sm" id="n-ask">${esc(t('notify.enable'))}</button>` : ''}</div></div>` : ''}
+      <div class="push-box"><div class="push-ic">${icon('bell', 22)}</div><div class="grow"><b>${esc(t('push.title'))}</b><small id="push-st">${esc(t('push.checking'))}</small></div>
+        <button class="btn sm" id="push-btn" disabled>…</button></div>
       ${toggle('n-desk', t('notify.desktop'), s.notifications !== false, t('notify.desktop_hint'))}
       ${toggle('n-sound', t('notify.sounds'), s.sounds !== false)}
       ${toggle('n-prev', t('notify.preview'), s.preview !== false, t('notify.preview_hint'))}
       <p class="muted small">${esc(t('notify.dnd_hint'))}</p>
       <button class="btn soft sm" id="n-test">${esc(t('notify.test'))}</button>`;
     el.querySelector('#n-ask')?.addEventListener('click', () => Notification.requestPermission().then(() => RENDER.notifications(el)));
+    const pst = async () => {
+      const st = await pushState().catch(() => 'unsupported');
+      const btn = el.querySelector('#push-btn');
+      const lbl = el.querySelector('#push-st');
+      if (!btn) return;
+      lbl.textContent = t(`push.st_${st}`);
+      btn.disabled = st === 'unsupported' || st === 'denied';
+      btn.textContent = st === 'on' ? t('push.disable') : t('push.enable');
+      btn.className = st === 'on' ? 'btn sm soft' : 'btn sm';
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try {
+          if (st === 'on') { await disablePush(); try { localStorage.setItem('gc-push', 'off'); } catch { /* ignore */ } } else {
+            await enablePush(); try { localStorage.removeItem('gc-push'); } catch { /* ignore */ }
+            await post('/api/push/test');
+          }
+        } catch (e) { toast(e.message === 'denied' ? t('notify.denied') : t('push.failed'), { type: 'error' }); }
+        pst();
+      };
+    };
+    pst();
     el.querySelector('#n-desk').onchange = (e) => saveSettings({ notifications: e.target.checked });
     el.querySelector('#n-sound').onchange = (e) => saveSettings({ sounds: e.target.checked });
     el.querySelector('#n-prev').onchange = (e) => saveSettings({ preview: e.target.checked });

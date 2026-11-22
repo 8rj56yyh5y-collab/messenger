@@ -114,6 +114,12 @@ function seed() {
 
   const soon = new Date(Date.now() + 40 * 60e3); soon.setMinutes(soon.getMinutes() < 30 ? 30 : 0, 0, 0); if (soon < Date.now() + 15 * 60e3) soon.setTime(soon.getTime() + 30 * 60e3);
   work.createMeeting(admin.id, fin.id, { title: 'Бюджет на грудень', starts_at: soon.getTime(), duration_min: 45, description: '1. Підсумки жовтня\n2. Ліміти ЦФО\n3. Платіжний календар' });
+  // Уже прошедшая планёрка с обсуждением в ветке — на ней можно попробовать «Протокол»
+  const past = work.createMeeting(admin.id, fin.id, { title: 'Ранкова планірка фінансів', starts_at: Date.now() + 60e3, duration_min: 30, description: '1. Залишки на рахунках\n2. Платежі дня\n3. Звірка з 1С' });
+  db.prepare('UPDATE meetings SET starts_at = ?, reminded = 1 WHERE id = ?').run(Date.now() - 2 * 3600e3, past.id);
+  chats.sendMessage(ids.olena, fin.id, { body: 'Залишок на ПУМБ 1,8 млн, на Ощаді 640 тис. Оренду платимо з Ощаду.', thread_id: past.message_id });
+  chats.sendMessage(ids.ivan, fin.id, { body: 'Звірку з 1С зроблю до 15:00, розбіжність лише по ПУМБ.', thread_id: past.message_id });
+  chats.sendMessage(admin.id, fin.id, { body: 'Добре. Маріє, підготуй до четверга реєстр платежів на наступний тиждень.', thread_id: past.message_id });
   const tmr = new Date(Date.now() + day); tmr.setHours(10, 0, 0, 0);
   work.createMeeting(ids.dmytro, sales.id, { title: 'Планірка відділу продажів', starts_at: tmr.getTime(), duration_min: 30 });
   const fri = new Date(Date.now() + 2 * day); fri.setHours(15, 0, 0, 0);

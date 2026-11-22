@@ -10,7 +10,7 @@ import { emojiPanelHtml, bindEmojiPanel, pushRecent } from './emoji.js';
 import { Recorder, toggleVoice, seekVoice, cycleSpeed } from './voice.js';
 import { startCall, joinCall } from './call.js';
 import * as app from './app.js';
-import { taskDialog, setTaskStatus, approvalDialog, decideApproval, meetingDialog, rsvp, kudosDialog, ackMessage, ackListDialog } from './work-ui.js';
+import { taskDialog, setTaskStatus, approvalDialog, decideApproval, meetingDialog, rsvp, kudosDialog, ackMessage, ackListDialog, minutesDialog } from './work-ui.js';
 import { recordVideoNote } from './videonote.js';
 
 const PAGE = 50;
@@ -1376,6 +1376,12 @@ export function handleCardAction(act, a) {
       const msg = [...S.messages.values()].flatMap((x) => x.list).find((x) => x.meeting?.id === id || x.meta?.meeting_id === id);
       const chatId = msg?.chat_id || V?.chatId;
       if (chatId) startCall(chatId, 'video');
+      return true;
+    }
+    case 'minutes': {
+      const id = Number(a.dataset.mid);
+      const msg = [...S.messages.values()].flatMap((x) => x.list).find((x) => x.meeting?.id === id);
+      if (msg) minutesDialog(msg.meeting);
       return true;
     }
     case 'ack': ackMessage(Number(a.dataset.id)); return true;

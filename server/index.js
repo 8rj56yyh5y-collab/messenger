@@ -12,6 +12,8 @@ const files = require('./files');
 const extras = require('./extras');
 const ai = require('./ai');
 const work = require('./work');
+const push = require('./push');
+const outbox = require('./outbox');
 const rt = require('./realtime');
 const { acceptUpgrade, Hub } = require('./ws');
 const pkg = require('../package.json');
@@ -118,7 +120,7 @@ route('PATCH', '/api/me', async (req, res, p, u) => {
     const cur = chats.userSettings(u);
     const allowed = ['theme', 'accent', 'wallpaper', 'fontSize', 'bubbleRadius', 'sendOnEnter', 'notifications', 'sounds', 'preview',
       'hideLastSeen', 'hideEmail', 'hidePhone', 'compact', 'animations', 'folders', 'quickReactions', 'readReceipts', 'timeFormat',
-      'autoReply', 'templates', 'animatedWallpaper', 'density'];
+      'autoReply', 'templates', 'animatedWallpaper', 'density', 'push'];
     for (const k of allowed) if (k in b.settings) cur[k] = b.settings[k];
     const json = JSON.stringify(cur);
     if (json.length > 20000) throw new HttpError(400, 'Слишком много настроек');
@@ -240,7 +242,16 @@ route('GET', '/api/meetings', (req, res, p, u, q) => work.listMeetings(u.id, q.g
 route('POST', '/api/meetings/:id/rsvp', async (req, res, p, u) => work.rsvp(u.id, p.id, (await readJson(req)).rsvp));
 route('POST', '/api/meetings/:id/cancel', (req, res, p, u) => work.cancelMeeting(u.id, p.id));
 route('GET', '/api/pulse', (req, res, p, u) => work.pulse(u.id));
+route('POST', '/api/meetings/:id/minutes', async (req, res, p, u) => work.saveMinutes(u.id, p.id, await readJson(req)));
+route('POST', '/api/meetings/:id/minutes/draft', (req, res, p, u) => ai.minutesDraft(u, p.id));
+route('GET', '/api/admin/integrations', (req, res, p, u) => { extras.requireAdmin(u); return { gobsek_events: outbox.stats(), push_devices: db.prepare('SELECT COUNT(*) AS n FROM push_subs').get().n, ai: ai.enabled() }; });
 route('GET', '/api/acks/pending', (req, res, p, u) => chats.pendingAcks(u.id));
+
+// --- Push-уведомления ---
+route('GET', '/api/push/key', (req, res, p, u) => ({ key: push.vapid().publicKey, devices: push.count(u.id) }));
+route('POST', '/api/push/subscribe', async (req, res, p, u) => push.subscribe(u.id, await readJson(req), req.headers['user-agent']));
+route('POST', '/api/push/unsubscribe', async (req, res, p, u) => push.unsubscribe(u.id, (await readJson(req)).endpoint));
+route('POST', '/api/push/test', async (req, res, p, u) => ({ sent: await push.notifyUser(u.id, { title: APP_NAME, body: '🔔 Push работает', tag: 'test', url: '/' }, { force: true }) }));
 
 // --- Файлы ---
 route('POST', '/api/files', (req, res, p, u) => files.upload(req, u), { raw: true });
@@ -420,6 +431,7 @@ server.on('upgrade', (req, socket) => {
 
 extras.startScheduler();
 work.start();
+outbox.start();
 
 if (require.main === module) {
   const PORT = Number(process.env.PORT) || 3000;

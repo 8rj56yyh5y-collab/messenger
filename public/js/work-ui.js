@@ -234,3 +234,63 @@ export function confetti() {
 }
 
 export { userName };
+
+// ---------- Протокол наради ----------
+export async function minutesDialog(meeting) {
+  const people = meeting.attendees.map((a) => S.users.get(a.user_id) || (a.user_id === S.me.id ? S.me : { id: a.user_id, name: userName(a.user_id) }));
+  const m = modal({
+    title: t('min.title', { title: meeting.title }), wide: true,
+    content: `${S.meta.ai ? `<button class="btn soft ai-draft" data-a="ai">${icon('sparkles', 16)} ${esc(t('min.ai'))}</button>` : `<p class="muted small">${esc(t('min.no_ai'))}</p>`}
+      <label class="field"><span>${esc(t('min.summary'))}</span><textarea class="input" id="mn-sum" rows="3" maxlength="4000" placeholder="${esc(t('min.summary_ph'))}"></textarea></label>
+      <label class="field"><span>${esc(t('min.decisions'))}</span><textarea class="input" id="mn-dec" rows="4" placeholder="${esc(t('min.decisions_ph'))}"></textarea></label>
+      <div class="field"><span>${esc(t('min.tasks'))}</span><div class="mn-tasks"></div><button class="link-btn" data-a="add">+ ${esc(t('min.add_task'))}</button></div>
+      <div class="modal-actions"><button class="btn soft" data-a="no">${esc(t('common.cancel'))}</button><button class="btn" data-a="yes">${icon('check', 16)} ${esc(t('min.save'))}</button></div>`,
+  });
+  const b = m.body;
+  const list = b.querySelector('.mn-tasks');
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const dateVal = (ts) => { if (!ts) return ''; const d = new Date(ts); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+  const addRow = (tk = {}) => {
+    const row = document.createElement('div');
+    row.className = 'mn-row';
+    row.innerHTML = `<input class="input mn-title" maxlength="200" placeholder="${esc(t('task.title_ph'))}" value="${esc(tk.title || '')}">
+      <select class="input mn-who"><option value="">${esc(t('task.assignee'))}…</option>${people.map((u) => `<option value="${u.id}" ${tk.assignee_id === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>
+      <input class="input mn-due" type="date" value="${dateVal(tk.due_at)}"><button class="icon-btn ghost" data-a="rm">${icon('x', 16)}</button>`;
+    list.appendChild(row);
+  };
+  addRow();
+  b.addEventListener('click', async (e) => {
+    const a = e.target.closest('[data-a]');
+    if (!a) return;
+    if (a.dataset.a === 'add') addRow();
+    if (a.dataset.a === 'rm') a.closest('.mn-row').remove();
+    if (a.dataset.a === 'no') m.close();
+    if (a.dataset.a === 'ai') {
+      a.disabled = true;
+      a.innerHTML = `<span class="spinner sm"></span> ${esc(t('min.ai_wait'))}`;
+      try {
+        const d = await post(`/api/meetings/${meeting.id}/minutes/draft`);
+        b.querySelector('#mn-sum').value = d.summary || '';
+        b.querySelector('#mn-dec').value = (d.decisions || []).join('\n');
+        list.innerHTML = '';
+        (d.tasks || []).forEach(addRow);
+        if (!(d.tasks || []).length) addRow();
+        a.innerHTML = `${icon('check', 16)} ${esc(t('min.ai_done'))}`;
+      } catch (err) { toast(errText(err), { type: 'error' }); a.disabled = false; a.innerHTML = `${icon('sparkles', 16)} ${esc(t('min.ai'))}`; }
+    }
+    if (a.dataset.a === 'yes') {
+      const tasks = [...list.querySelectorAll('.mn-row')].map((r) => ({
+        title: r.querySelector('.mn-title').value.trim(), assignee_id: Number(r.querySelector('.mn-who').value) || null,
+        due_at: r.querySelector('.mn-due').value ? new Date(`${r.querySelector('.mn-due').value}T18:00:00`).getTime() : null,
+      })).filter((x) => x.title);
+      try {
+        const out = await post(`/api/meetings/${meeting.id}/minutes`, {
+          summary: b.querySelector('#mn-sum').value, decisions: b.querySelector('#mn-dec').value.split('\n').map((x) => x.replace(/^[-•\d.)\s]+/, '').trim()).filter(Boolean), tasks,
+        });
+        m.close();
+        toast(t('min.saved', { n: out.tasks.length }));
+        emit('tasks:changed');
+      } catch (err) { toast(errText(err), { type: 'error' }); }
+    }
+  });
+}

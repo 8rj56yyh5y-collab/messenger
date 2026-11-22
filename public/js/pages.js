@@ -8,7 +8,7 @@ import { toast, modal } from './dialogs.js';
 import { previewText } from './messages.js';
 import { startCall } from './call.js';
 import {
-  taskDialog, setTaskStatus, meetingDialog, rsvp, kudosDialog, decideApproval, ackMessage, BADGES, PRIORITY_COLORS, TASK_STATUSES, fmtMoney,
+  taskDialog, setTaskStatus, meetingDialog, rsvp, kudosDialog, decideApproval, ackMessage, BADGES, PRIORITY_COLORS, TASK_STATUSES, fmtMoney, minutesDialog,
 } from './work-ui.js';
 import * as app from './app.js';
 
@@ -231,13 +231,14 @@ async function meetingDetails(id) {
       ${m.description ? `<div class="text">${md(m.description)}</div>` : ''}
       <div class="sec-title">${esc(t('meet.attendees'))}</div><div class="list">${m.attendees.map((a) => `<div class="li-row">${avatar(S.users.get(a.user_id) || { name: userName(a.user_id) }, 32)}<div class="li-main"><b>${esc(userName(a.user_id))}</b></div><span class="rsvp-tag r-${a.rsvp}">${esc(t(`rsvp.${a.rsvp}`))}</span></div>`).join('')}</div>
       <div class="modal-actions">${!m.cancelled ? ['yes', 'maybe', 'no'].map((r) => `<button class="btn sm ${m.my_rsvp === r ? '' : 'soft'}" data-r="${r}">${esc(t(`rsvp.${r}`))}</button>`).join('') : ''}
-        <span class="grow"></span><button class="btn soft sm" data-a="chat">${icon('send', 14)}</button>${live ? `<button class="btn sm hl" data-a="join">${icon('video', 14)} ${esc(t('call.join'))}</button>` : ''}</div>`,
+        <span class="grow"></span>${Date.now() > m.starts_at - 10 * 60e3 && !m.cancelled ? `<button class="btn soft sm" data-a="minutes">📝 ${esc(t('min.button'))}</button>` : ''}<button class="btn soft sm" data-a="chat">${icon('send', 14)}</button>${live ? `<button class="btn sm hl" data-a="join">${icon('video', 14)} ${esc(t('call.join'))}</button>` : ''}</div>`,
   });
   md2.body.addEventListener('click', async (e) => {
     const r = e.target.closest('[data-r]');
     if (r) { await rsvp(m.id, r.dataset.r); md2.close(); RENDER.calendar(); return; }
     const a = e.target.closest('[data-a]');
     if (a?.dataset.a === 'chat') { md2.close(); app.openChatById(m.chat_id, { jumpTo: m.message_id }); }
+    if (a?.dataset.a === 'minutes') { md2.close(); minutesDialog(m); }
     if (a?.dataset.a === 'join') { md2.close(); app.openChatById(m.chat_id); startCall(m.chat_id, 'video'); }
   });
 }

@@ -144,3 +144,64 @@ async def notify_chat(hook_url: str, title: str, text: str, url: str = "") -> No
 «Gobsek · Задачі» ← прострочення й делегування, канал «Новини» ← анонс релізу «Що нового».
 
 Удалить вебхук — та же панель; все системы, использующие его адрес, перестанут писать.
+
+## 3. События из мессенджера в Gobsek
+
+Мессенджер сам сообщает Gobsek о рабочих событиях — задачи, погодження, встречи и протоколы попадают в систему управления
+без ручного переноса. Включается двумя переменными мессенджера:
+
+```
+GOBSEK_EVENTS_URL=https://gobsek.example/api/v1/chat/events
+GOBSEK_EVENTS_SECRET=<длинная случайная строка, та же, что chat_events_secret в Gobsek>
+```
+
+Доставка надёжная: события лежат в очереди (`outbox`) и повторяются с растущей паузой (30 с → … → 6 ч, до 12 попыток),
+если Gobsek недоступен. Состояние очереди — «Администрирование → Интеграции».
+
+| Событие (`X-Gobsek-Chat-Event`) | Когда | Что в `data` |
+|---|---|---|
+| `task.created`, `task.updated`, `task.status` | задача поставлена, изменена, сменила статус | `task` (название, статус, приоритет, срок, `assignee`, `creator`), `actor` |
+| `approval.created`, `approval.decided` | заявка на погодження, решение согласующего | название, сумма, валюта, `approvers`/`by`, `decision`, итоговый `status` |
+| `meeting.created` | запланирована встреча | тема, время, длительность, `organizer`, `attendees` |
+| `meeting.minutes` | сохранён протокол наради | `summary`, `decisions[]`, `tasks[]` с исполнителями — готово для модуля «Протоколи» |
+| `kudos.given` | подяка | `from`, `to[]`, значок, текст |
+
+Сотрудники передаются как `{ id, login, name, gobsek_id }` — `gobsek_id` заполнен у тех, кто входил через Gobsek.
+
+Тело: `{"event": "...", "data": {...}, "ts": "ISO-время"}`. Заголовок `X-Gobsek-Chat-Signature: sha256=<HMAC-SHA256(тело)>`,
+`X-Gobsek-Chat-Delivery` — номер доставки (для защиты от повторов). Ответ 2xx — принято, иначе мессенджер повторит.
+
+Приёмник в Gobsek (FastAPI):
+
+```python
+import hashlib
+import hmac
+
+from fastapi import APIRouter, Header, HTTPException, Request
+
+from app.shared.config import get_settings
+
+router = APIRouter(prefix="/chat", tags=["chat"])
+
+
+@router.post("/events")
+async def chat_events(request: Request, x_gobsek_chat_signature: str = Header(""), x_gobsek_chat_delivery: str = Header("")) -> dict:
+    body = await request.body()
+    expected = "sha256=" + hmac.new(get_settings().chat_events_secret.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, x_gobsek_chat_signature):
+        raise HTTPException(401, "bad signature")
+    event = await request.json()
+    # Идемпотентность: x_gobsek_chat_delivery уже обработан? — пропустить.
+    # meeting.minutes → протокол + задачі в модулі protocols; task.* → Universal Task Engine; approval.decided → журнал погоджень.
+    return {"ok": True}
+```
+
+Этот маршрут не требует `CurrentUser` (его вызывает сервер, а не человек) — его нужно добавить в явный allowlist
+`tests/test_route_auth_coverage.py`; защита — подпись HMAC.
+
+## 4. Push-уведомления
+
+Мессенджер отправляет Web Push сам (VAPID-ключи создаются при первом запуске и хранятся в базе). Сотрудник включает push
+в «Настройки → Уведомления». Работает в Chrome, Edge, Firefox, Safari на Mac и на iPhone/iPad (iOS 16.4+, приложение
+должно быть добавлено «На экран Домой»). Нужен HTTPS. Переменная `VAPID_SUBJECT` — контакт администратора
+(`mailto:it@компания` или адрес сайта), его видят push-сервисы браузеров.

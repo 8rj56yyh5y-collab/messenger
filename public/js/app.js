@@ -14,6 +14,7 @@ import { openSettings, applyTheme, applyAppearance } from './settings.js';
 import { openAdmin } from './admin.js';
 import { openHelp } from './help.js';
 import { showPage, hidePage, currentPage } from './pages.js';
+import { syncPush } from './push.js';
 
 let sock = null;
 export const socket = () => sock;
@@ -151,6 +152,7 @@ async function start(user) {
   window.addEventListener('hashchange', route);
   route();
   refreshBadges();
+  syncPush();
   if (user.must_change_pw) setTimeout(() => openSettings('security', { forced: true }), 400);
 }
 
@@ -482,7 +484,8 @@ function notify(chat, m, viewing) {
 }
 
 export function askNotifications() {
-  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().then(() => {});
+  // Разрешение спрашиваем по первому действию пользователя; после согласия — сразу подписка на push
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().then((p) => { if (p === 'granted') syncPush(); });
 }
 document.addEventListener('click', function once() { askNotifications(); document.removeEventListener('click', once); });
 

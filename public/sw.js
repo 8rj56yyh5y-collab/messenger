@@ -1,5 +1,5 @@
 // Service worker: оболочка приложения доступна без сети, API — всегда из сети.
-const CACHE = 'gc-shell-v2';
+const CACHE = 'gc-shell-v3';
 const SHELL = ['/', '/index.html', '/css/app.css', '/css/design2.css', '/icon.svg', '/manifest.webmanifest', '/js/theme-boot.js'];
 
 self.addEventListener('install', (e) => {
@@ -20,7 +20,26 @@ self.addEventListener('fetch', (e) => {
     return res;
   }).catch(() => caches.match(e.request).then((r) => r || caches.match('/index.html'))));
 });
+// Push-уведомления (сервер шлёт их, когда приложение закрыто)
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { title: 'Gobsek Chat', body: e.data ? e.data.text() : '' }; }
+  e.waitUntil((async () => {
+    // Приложение открыто и видно — системное уведомление не нужно
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    if (wins.some((w) => w.visibilityState === 'visible') && !d.call) return;
+    await self.registration.showNotification(d.title || 'Gobsek Chat', {
+      body: d.body || '', tag: d.tag, renotify: !!d.tag, icon: '/icon.svg', badge: '/icon.svg',
+      data: { url: d.url || '/' }, requireInteraction: !!d.call, vibrate: d.call ? [300, 150, 300, 150, 300] : [80],
+    });
+  })());
+});
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  e.waitUntil(self.clients.matchAll({ type: 'window' }).then((list) => (list[0] ? list[0].focus() : self.clients.openWindow('/'))));
+  const url = (e.notification.data && e.notification.data.url) || '/';
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+    const w = list[0];
+    if (w) { w.focus(); if ('navigate' in w) return w.navigate(url).catch(() => {}); return undefined; }
+    return self.clients.openWindow(url);
+  }));
 });

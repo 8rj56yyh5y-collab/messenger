@@ -301,6 +301,7 @@ function meetingCardHtml(m) {
     ${mt.description ? `<div class="wc-desc">${md(mt.description)}</div>` : ''}
     <div class="mt-people">${yes.slice(0, 6).map((a) => avatar(S.users.get(a.user_id) || { id: a.user_id, name: userName(a.user_id) }, 24)).join('')}
       <span class="muted small">${esc(t('meet.going', { n: yes.length, total: mt.attendees.length }))}</span></div>
+    ${!mt.cancelled && Date.now() > mt.starts_at - 10 * 60e3 && mt.attendees.some((x) => x.user_id === S.me.id) ? `<button class="btn sm soft block mt-minutes" data-action="minutes" data-mid="${mt.id}">📝 ${esc(t('min.button'))}</button>` : ''}
     ${!mt.cancelled && !past ? `<div class="wc-actions">
       ${live ? `<button class="btn sm hl" data-action="meeting-join" data-mid="${mt.id}">${icon('video', 14)} ${esc(t('call.join'))}</button>` : ''}
       ${mt.my_rsvp ? ['yes', 'maybe', 'no'].map((r) => `<button class="btn sm ${mt.my_rsvp === r ? '' : 'soft'}" data-action="rsvp" data-mid="${mt.id}" data-r="${r}">${esc(t(`rsvp.${r}`))}</button>`).join('') : ''}

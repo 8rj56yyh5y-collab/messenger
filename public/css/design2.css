@@ -438,3 +438,21 @@ body:not([data-section="chats"]).panel-open .layout { grid-template-columns: var
   .round-video { width: 200px; height: 200px; }
   .kbd-hint { display: none; }
 }
+
+/* Push в настройках */
+.push-box { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 16px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, var(--surface)), var(--surface)); border: 1px solid var(--island-line); margin-bottom: 10px; }
+.push-box small { display: block; color: var(--muted); font-size: .84em; }
+.push-ic { width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center; color: #fff; background: var(--grad); flex: none; }
+
+/* Протокол наради */
+.ai-draft { width: 100%; margin-bottom: 12px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 14%, var(--surface-2)), color-mix(in srgb, var(--accent-2) 14%, var(--surface-2))); }
+.mn-tasks { display: grid; gap: 6px; margin-bottom: 6px; }
+.mn-row { display: grid; grid-template-columns: 1fr 180px 140px 36px; gap: 6px; align-items: center; }
+.mt-minutes { margin-top: 8px; }
+@media (max-width: 760px) { .mn-row { grid-template-columns: 1fr 1fr; } .mn-row .mn-title { grid-column: 1 / -1; } }
+/* Интеграции */
+.integ { display: grid; gap: 8px; }
+.integ-row { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 14px; background: var(--surface-2); }
+.integ-row b { display: block; } .integ-row span { color: var(--muted); font-size: .86em; }
+.integ-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--faint); margin-top: 6px; flex: none; }
+.integ-dot.on { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 20%, transparent); }

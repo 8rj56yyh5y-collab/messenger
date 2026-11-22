@@ -6,7 +6,7 @@ import { icon } from './icons.js';
 import { get, post, patch, del } from './api.js';
 import { modal, toast, confirmDialog } from './dialogs.js';
 
-const TABS = [['stats', 'chart'], ['users', 'users'], ['invites', 'link'], ['audit', 'list']];
+const TABS = [['stats', 'chart'], ['users', 'users'], ['invites', 'link'], ['integr', 'hook'], ['audit', 'list']];
 
 export function openAdmin(tab = 'stats') {
   const m = modal({ title: t('side.admin'), wide: true, content: '' });
@@ -82,6 +82,18 @@ const VIEWS = {
       const d = e.target.closest('[data-del]');
       if (d) { await del(`/api/admin/invites/${d.dataset.del}`); redraw(); }
     };
+  },
+
+  async integr(el) {
+    const st = await get('/api/admin/integrations');
+    const ev = st.gobsek_events;
+    const row = (ok, title, text) => `<div class="integ-row"><span class="integ-dot ${ok ? 'on' : ''}"></span><div><b>${esc(title)}</b><span>${esc(text)}</span></div></div>`;
+    el.innerHTML = `<div class="integ">
+      ${row(ev.enabled, t('integ.gobsek_events'), ev.enabled ? t('integ.events_stat', { d: ev.delivered, p: ev.pending, f: ev.failed }) + (ev.last_error ? ` · ${ev.last_error}` : '') : t('integ.events_off'))}
+      ${row(S.meta.sso, t('integ.sso'), S.meta.sso ? t('about.on') : t('integ.sso_off'))}
+      ${row(st.ai, t('integ.ai'), st.ai ? t('about.on') : t('integ.ai_off'))}
+      ${row(st.push_devices > 0, t('integ.push'), t('integ.push_stat', { n: st.push_devices }))}
+      <p class="muted small">${esc(t('integ.hint'))}</p></div>`;
   },
 
   async audit(el) {

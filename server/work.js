@@ -34,6 +34,13 @@ function chatLabel(c, uid) {
   return { id: c.id, type: c.type, title };
 }
 
+/** Сотрудник для внешних систем: Gobsek сопоставляет по gobsek_id или логину. */
+function personRef(id) {
+  const u = id ? chats.userById(id) : null;
+  return u ? { id: u.id, login: u.login, name: u.name, gobsek_id: u.gobsek_id || null } : null;
+}
+function emitWork(event, data) { rt.emit('work', { event, data }); }
+
 function refreshCard(messageId) {
   const m = messageId && chats.messageRow(messageId);
   if (!m || m.deleted) return;
@@ -104,6 +111,19 @@ function notifyTask(id, actorId, what) {
   if (!t) return;
   const ev = { type: 'task:update', task: chats.taskView(t), actor: actorId, what };
   rt.toUsers([t.creator_id, t.assignee_id].filter(Boolean), ev);
+  rt.emit('task', { task: t, actorId, what });
+  emitWork(what === 'created' ? 'task.created' : what.startsWith('status:') ? 'task.status' : 'task.updated', {
+    task: { ...chats.taskView(t), assignee: personRef(t.assignee_id), creator: personRef(t.creator_id) }, actor: personRef(actorId),
+  });
+  // Push исполнителю о новой задаче и постановщику — о выполнении
+  const push = require('./push');
+  const actor = chats.userById(actorId)?.name || '';
+  if (what === 'created' && t.assignee_id && t.assignee_id !== actorId) {
+    push.notifyUser(t.assignee_id, { title: `✅ ${actor}`, body: t.title, tag: `task-${t.id}`, url: '/#/tasks' }).catch(() => {});
+  }
+  if (what === 'status:done' && t.creator_id !== actorId) {
+    push.notifyUser(t.creator_id, { title: `🎉 ${actor}`, body: t.title, tag: `task-${t.id}`, url: '/#/tasks' }).catch(() => {});
+  }
 }
 
 function listTasks(uid, scope = 'mine') {
@@ -135,7 +155,9 @@ function createApproval(uid, chatId, b) {
     title, amount, currency: str(b.currency, 6) || 'UAH', description: str(b.description, 2000), approvers,
     decisions: {}, status: 'pending', mode: b.mode === 'any' ? 'any' : 'all', due_at: b.due_at ? int(b.due_at) : null,
   };
-  return chats.postMessage(uid, chat.id, { kind: 'approval', body: title, meta: { ...meta, mentions: approvers } });
+  const msg = chats.postMessage(uid, chat.id, { kind: 'approval', body: title, meta: { ...meta, mentions: approvers } });
+  emitWork('approval.created', { message_id: msg.id, chat_id: chat.id, ...meta, author: personRef(uid), approvers: approvers.map(personRef) });
+  return msg;
 }
 
 function decide(uid, msgId, b) {
@@ -158,6 +180,8 @@ function decide(uid, msgId, b) {
   chats.postMessage(uid, chat.id, { thread_id: m.id, body: comment || '', kind: 'text', system: true, meta: { decision } });
   if (meta.status !== 'pending') rt.toUser(m.user_id, { type: 'approval:done', message_id: m.id, chat_id: chat.id, status: meta.status, title: meta.title });
   logEvent(uid, 'approval_decide', { msg: m.id, decision });
+  emitWork('approval.decided', { message_id: m.id, chat_id: chat.id, title: meta.title, amount: meta.amount, currency: meta.currency,
+    decision, comment, status: meta.status, by: personRef(uid), author: personRef(m.user_id) });
   return chats.serializeMessage(chats.messageRow(m.id), uid);
 }
 
@@ -176,7 +200,9 @@ function giveKudos(uid, chatId, b) {
   if (!to.length) throw new HttpError(400, 'Кому подяка?', 'kudos_to');
   to.forEach(activeUser);
   const badge = BADGES.includes(b.badge) ? b.badge : 'teamwork';
-  return chats.postMessage(uid, chat.id, { kind: 'kudos', body: str(b.text, 1000), meta: { to, badge, mentions: to } });
+  const msg = chats.postMessage(uid, chat.id, { kind: 'kudos', body: str(b.text, 1000), meta: { to, badge, mentions: to } });
+  emitWork('kudos.given', { from: personRef(uid), to: to.map(personRef), badge, text: msg.body });
+  return msg;
 }
 
 function kudosBoard(uid) {
@@ -220,6 +246,7 @@ function createMeeting(uid, chatId, b) {
   const card = chats.postMessage(uid, chat.id, { kind: 'meeting', body: title, meta: { meeting_id: id, mentions: attendees.filter((a) => a !== uid) } });
   db.prepare('UPDATE meetings SET message_id = ? WHERE id = ?').run(card.id, id);
   refreshCard(card.id);
+  emitWork('meeting.created', { id, chat_id: chat.id, title, starts_at: startsAt, duration_min: duration, organizer: personRef(uid), attendees: attendees.map(personRef) });
   return chats.meetingView(db.prepare('SELECT * FROM meetings WHERE id = ?').get(id), uid);
 }
 
@@ -252,6 +279,37 @@ function listMeetings(uid, from, to) {
     if (c) v.chat = chatLabel(c, uid);
     return v;
   });
+}
+
+// ---------- Протокол наради ----------
+function meetingContext(uid, id) {
+  const mt = db.prepare('SELECT * FROM meetings WHERE id = ?').get(int(id));
+  if (!mt || !chats.membership(mt.chat_id, uid)) throw new HttpError(404, 'Встреча не найдена');
+  return mt;
+}
+
+/** Сохранить протокол: сообщение в ветке под карточкой встречи + задачи по поручениям. */
+function saveMinutes(uid, id, b) {
+  const mt = meetingContext(uid, id);
+  const summary = str(b.summary, 4000);
+  const decisions = (Array.isArray(b.decisions) ? b.decisions : []).map((x) => str(x, 500)).filter(Boolean).slice(0, 30);
+  const items = (Array.isArray(b.tasks) ? b.tasks : []).filter((x) => str(x.title, 200)).slice(0, 30);
+  if (!summary && !decisions.length && !items.length) throw new HttpError(400, 'Протокол пустой', 'empty');
+  const created = [];
+  for (const it of items) {
+    try {
+      created.push(createTask(uid, { chat_id: mt.chat_id, title: it.title, assignee_id: it.assignee_id || uid, due_at: it.due_at || null, priority: it.priority || 'normal', description: `${mt.title}` }));
+    } catch { /* исполнитель мог покинуть чат — пропускаем */ }
+  }
+  const lines = [`📝 **Протокол: ${mt.title}**`];
+  if (summary) lines.push('', summary);
+  if (decisions.length) lines.push('', '**Рішення / Решения:**', ...decisions.map((d) => `- ${d}`));
+  if (created.length) lines.push('', '**Доручення / Поручения:**', ...created.map((t) => `- ${t.title} — @${chats.userById(t.assignee_id)?.login}`));
+  const thread = mt.message_id && chats.messageRow(mt.message_id) && !chats.messageRow(mt.message_id).deleted ? mt.message_id : null;
+  const msg = chats.postMessage(uid, mt.chat_id, { body: lines.join('\n'), thread_id: thread, meta: { minutes: { meeting_id: mt.id, decisions, tasks: created.map((t) => t.id) } } });
+  emitWork('meeting.minutes', { meeting_id: mt.id, chat_id: mt.chat_id, title: mt.title, starts_at: mt.starts_at, summary, decisions,
+    tasks: created.map((t) => ({ ...t, assignee: personRef(t.assignee_id) })), author: personRef(uid) });
+  return { message: msg, tasks: created };
 }
 
 // ---------- Пульс компании ----------
@@ -332,5 +390,5 @@ rt.on('message', ({ chat, row, type }) => {
 
 module.exports = {
   BADGES, createTask, updateTask, listTasks, createApproval, decide, pendingApprovals, giveKudos, kudosBoard,
-  createMeeting, rsvp, cancelMeeting, listMeetings, pulse, tick, start,
+  createMeeting, rsvp, cancelMeeting, listMeetings, pulse, tick, start, saveMinutes, meetingContext, personRef,
 };
