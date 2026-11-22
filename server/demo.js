@@ -150,6 +150,17 @@ function seed() {
   db.prepare('UPDATE chat_members SET last_read_id = (SELECT COALESCE(MAX(id), 0) FROM messages WHERE chat_id = chat_members.chat_id)').run();
   db.prepare('UPDATE chat_members SET last_read_id = last_read_id - 2 WHERE user_id = ? AND chat_id IN (?, ?)').run(admin.id, fin.id, dm2.id);
   chats.ensureAi(admin.id);
+  // Налаштування компанії, власний значок і кілька подяк — щоб сторінка «Нагороди» була живою
+  require('./workspace').update(admin, {
+    company: 'ТОВ «Гобсек»', welcome: 'Робочий мессенджер компанії. Вхід — тим самим логіном, що й у Gobsek.',
+    announcement: { text: 'У пʼятницю о 16:00 — загальні збори в залі №2 і онлайн. Підсумки кварталу й нагородження 🏆', level: 'info' },
+    custom_badges: [{ code: 'c_hero', emoji: '🦸', name: 'Герой кварталу', points: 50 }],
+  });
+  work.giveKudos(admin.id, general, { to: [ids.olena], badge: 'c_hero', text: 'Олено, бюджет на рік — це було потужно!' });
+  work.giveKudos(ids.maria, general, { to: [ids.olena], badge: 'mentor', text: 'Дякую за терпіння з новою звітністю' });
+  work.giveKudos(ids.ivan, general, { to: [ids.maria], badge: 'teamwork', text: '' });
+  const awards = require('./awards');
+  for (const id of [admin.id, ...Object.values(ids)]) awards.check(id);
   console.log(`Демо-данные созданы. Вход: admin / ${PASSWORD} (у всех сотрудников тот же пароль: olena, ivan, maria, dmytro, anna, serhii, natalia, andrii, yulia).`);
   return true;
 }

@@ -1,11 +1,11 @@
 // Точка входа: вход, оболочка приложения, события сервера, уведомления, общие окна.
-import { S, emit, on, upsertChat, upsertUser, chatTitle, peerOf, isMuted, userName } from './store.js';
+import { S, emit, on, upsertChat, upsertUser, chatTitle, peerOf, isMuted, userName, feat } from './store.js';
 import { t, setLang, detectLang, errText, LANGS, getLang } from './i18n.js';
 import { $, $$, esc, avatar, fmtDateTime, fmtDuration, plain, isMobile, setTimeFormat } from './util.js';
 import { icon } from './icons.js';
 import { get, post, patch, del, Socket, setUnauthorizedHandler } from './api.js';
 import { modal, toast, confirmDialog, closeTopModal, hasModal, closeMenu, contextMenu } from './dialogs.js';
-import { sidebarHtml, bindSidebar, renderList, focusSearch } from './sidebar.js';
+import { sidebarHtml, bindSidebar, renderList, focusSearch, renderAnnounce } from './sidebar.js';
 import { openChat, closeChat, emptyHtml, currentView, jumpTo } from './chat.js';
 import { openPanel as _openPanel, closePanel, panelState } from './panel.js';
 import { initCalls, handleCallEvent, startCall, currentCall } from './call.js';
@@ -45,7 +45,7 @@ function hashParam(prefix) {
 function authShell(inner) {
   const langSel = `<div class="auth-lang">${LANGS.map((l) => `<button class="${l.code === getLang() ? 'on' : ''}" data-lang="${l.code}">${l.code.toUpperCase()}</button>`).join('')}</div>`;
   $('#app').innerHTML = `<div class="auth"><div class="auth-card">${langSel}
-    <div class="auth-logo"><span class="logo-mark">${icon('send', 30)}</span><h1>${esc(S.meta.name)}</h1><p>${esc(t('auth.tagline'))}</p></div>${inner}</div>
+    <div class="auth-logo"><span class="logo-mark">${icon('send', 30)}</span><h1>${esc(S.meta.name)}</h1><p>${esc(S.meta.ws?.company || t('auth.tagline'))}</p></div>${S.meta.ws?.welcome ? `<div class="auth-welcome">${esc(S.meta.ws.welcome)}</div>` : ''}${inner}</div>
     <div class="auth-foot">${esc(t('auth.foot'))} · v${esc(S.meta.version || '')}</div></div>`;
   $$('.auth-lang [data-lang]').forEach((b) => { b.onclick = () => { setLang(b.dataset.lang); authScreen(); }; });
 }
@@ -146,12 +146,20 @@ async function start(user) {
   S.online = new Set(data.online);
   for (const c of data.calls) S.calls.set(c.id, c);
   renderList();
+  renderAnnounce();
   sock = new Socket(onWs, (st) => { S.connection = st; emit('connection'); if (st === 'online') resync(); });
   initCalls(sock);
   sock.connect();
   window.addEventListener('hashchange', route);
+  const sp = S.settings.startPage;
+  if ((!location.hash || location.hash === '#') && sp && sp !== 'chats' && SECTIONS.includes(sp)) history.replaceState(null, '', `#/${sp}`);
   route();
   refreshBadges();
+  // Часовий пояс — щоб «тихі години» в push працювали за місцевим часом
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz && S.settings.tz !== tz) { S.settings.tz = tz; patch('/api/me', { settings: { tz } }).catch(() => {}); }
+  } catch { /* ignore */ }
   syncPush();
   if (user.must_change_pw) setTimeout(() => openSettings('security', { forced: true }), 400);
 }
@@ -175,7 +183,7 @@ export function navigate(hash) {
   if (location.hash === `#${hash}` || (!hash && !location.hash)) { route(); return; }
   location.hash = hash;
 }
-const SECTIONS = ['pulse', 'tasks', 'calendar', 'calls', 'people', 'me'];
+const SECTIONS = ['pulse', 'tasks', 'calendar', 'calls', 'people', 'me', 'awards'];
 function setSection(name) {
   S.section = name;
   document.body.dataset.section = name;
@@ -185,7 +193,7 @@ function route() {
   const h = location.hash;
   const join = hashParam('join');
   if (join) { history.replaceState(null, '', '#'); joinByCode(join); return; }
-  const sec = /^#\/(pulse|tasks|calendar|calls|people|me)$/.exec(h);
+  const sec = /^#\/(pulse|tasks|calendar|calls|people|me|awards)$/.exec(h);
   if (sec && SECTIONS.includes(sec[1])) {
     if (S.current) closeChat();
     closePanel();
@@ -208,13 +216,14 @@ function route() {
 // ---------- Навигационная рельса ----------
 const RAIL = [
   ['chats', 'chat', 'nav.chats'], ['pulse', 'activity', 'nav.pulse'], ['tasks', 'kanban', 'nav.tasks'],
-  ['calendar', 'calendar', 'nav.calendar'], ['calls', 'phone', 'nav.calls'], ['people', 'users', 'nav.people'], ['me', 'user', 'nav.me'],
+  ['calendar', 'calendar', 'nav.calendar'], ['calls', 'phone', 'nav.calls'], ['people', 'users', 'nav.people'], ['awards', 'award', 'nav.awards'], ['me', 'user', 'nav.me'],
 ];
+const RAIL_FEAT = { tasks: 'tasks', calendar: 'meetings', calls: 'calls', awards: 'awards' };
 function railHtml() {
   return `<button class="rail-logo" data-rail="drawer" title="${esc(S.meta.name)}">${icon('send', 22)}</button>
-    <div class="rail-items">${RAIL.map(([k, ic, label]) => `<button class="rail-item" data-nav="${k}" title="${esc(t(label))}">${icon(ic, 22)}<span>${esc(t(label))}</span><i class="rail-badge hidden" data-badge="${k}"></i></button>`).join('')}</div>
+    <div class="rail-items">${RAIL.filter(([k]) => !RAIL_FEAT[k] || feat(RAIL_FEAT[k])).map(([k, ic, label]) => `<button class="rail-item" data-nav="${k}" title="${esc(t(label))}">${icon(ic, 22)}<span>${esc(t(label))}</span><i class="rail-badge hidden" data-badge="${k}"></i></button>`).join('')}</div>
     <span class="grow"></span>
-    <button class="rail-item rail-extra" data-rail="ai" title="Gobsek AI">${icon('sparkles', 22)}<span>AI</span></button>
+    ${S.meta.ai ? `<button class="rail-item rail-extra" data-rail="ai" title="Gobsek AI">${icon('sparkles', 22)}<span>AI</span></button>` : ''}
     <button class="rail-item rail-extra" data-rail="settings" title="${esc(t('side.settings'))}">${icon('settings', 22)}<span>${esc(t('nav.settings'))}</span></button>
     <button class="rail-me" data-nav="me" title="${esc(t('nav.me'))}">${avatar(S.me, 40)}<i class="st-dot st-${S.me.status || 'available'}"></i></button>`;
 }
@@ -267,6 +276,7 @@ export function profileGo(k) {
   switch (k) {
     case 'saved': openDirect(S.me.id); break;
     case 'ai': openAi(); break;
+    case 'awards': navigate('/awards'); break;
     case 'people': navigate('/people'); break;
     case 'calls': navigate('/calls'); break;
     case 'settings': openSettings(); break;
@@ -434,6 +444,22 @@ function onWs(msg) {
       toast(t(msg.status === 'approved' ? 'appr.notify_ok' : 'appr.notify_no', { title: msg.title }), { type: msg.status === 'approved' ? '' : 'error', action: () => openChatById(msg.chat_id, { jumpTo: msg.message_id }), actionLabel: t('common.open'), timeout: 8000 });
       refreshBadges();
       break;
+    case 'award':
+      if (S.settings.awardToasts !== false) {
+        toast(t('aw.toast', { ach: t(`ach.${msg.code}`), tier: t(`aw.tier_${msg.tier}`) }), { icon: msg.emoji, action: () => navigate('/awards'), actionLabel: t('common.open'), timeout: 9000 });
+        import('./work-ui.js').then((w) => w.confetti());
+        ping();
+      }
+      break;
+    case 'workspace':
+      S.meta.ws = msg.ws;
+      S.meta.ai = !!S.meta.ai_available && msg.ws.features.ai !== false;
+      S.meta.max_upload_mb = msg.ws.max_upload_mb;
+      $('#rail').innerHTML = railHtml();
+      if (S.section) setSection(S.section);
+      renderAnnounce();
+      emit('workspace');
+      break;
     case 'meeting:soon':
       toast(t('meet.soon', { title: msg.meeting.title }), { action: () => { openChatById(msg.meeting.chat_id); startCall(msg.meeting.chat_id, 'video'); }, actionLabel: t('call.join'), timeout: 15000 });
       ping();
@@ -480,12 +506,39 @@ function ping() {
     o.frequency.setValueAtTime(880, audioCtx.currentTime);
     o.frequency.exponentialRampToValueAtTime(1320, audioCtx.currentTime + 0.08);
     g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.09, audioCtx.currentTime + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.15 * (S.settings.soundVolume ?? 0.6), audioCtx.currentTime + 0.02);
     g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.25);
     o.connect(g); g.connect(audioCtx.destination);
     o.start(); o.stop(audioCtx.currentTime + 0.3);
   } catch { /* без звука */ }
 }
+
+// Персональні правила тиші (те саме, що server/push.js → suppressed)
+const KIND_PREF = { task: 'notifyTasks', approval: 'notifyApprovals', kudos: 'notifyKudos', meeting: 'notifyMeetings' };
+function inRange(hhmm, from, to) {
+  if (!from || !to || from === to) return false;
+  return from < to ? hhmm >= from && hhmm < to : hhmm >= from || hhmm < to;
+}
+function workTimeNow(now = new Date()) {
+  const w = S.meta.ws?.work_hours;
+  if (!w) return true;
+  const hm = now.toTimeString().slice(0, 5);
+  return w.days.includes(now.getDay()) && hm >= w.from && hm < w.to;
+}
+export function quietNow(now = new Date()) {
+  const s = S.settings;
+  return (!!s.quietHours?.enabled && inRange(now.toTimeString().slice(0, 5), s.quietHours.from, s.quietHours.to)) || (!!s.offHoursMute && !workTimeNow(now));
+}
+function suppressed(chat, m) {
+  const s = S.settings;
+  const k = KIND_PREF[m.kind] || (m.meta?.event === 'meeting_soon' ? 'notifyMeetings' : m.meta?.event === 'task_due' ? 'notifyTasks' : null);
+  if (k && s[k] === false) return true;
+  const group = !['direct', 'saved'].includes(chat.type) && m.kind !== 'system';
+  if (group && (s.groupNotify === 'mentions' || s.groupNotify === 'none')) return true;
+  return quietNow();
+}
+
+on('ping:test', () => ping());
 
 function notify(chat, m, viewing) {
   if (!chat) return;
@@ -494,6 +547,7 @@ function notify(chat, m, viewing) {
   const status = S.me.status;
   if (status === 'dnd' && !mentioned) return;
   if (viewing) return;
+  if (!mentioned && suppressed(chat, m)) return;
   ping();
   if (S.settings.notifications === false || !('Notification' in window) || Notification.permission !== 'granted' || !document.hidden) return;
   const title = chat.type === 'direct' ? userName(m.user_id) : `${chatTitle(chat, t)}${m.user_id ? ` · ${userName(m.user_id)}` : ''}`;
@@ -564,6 +618,7 @@ export function openDrawer() {
         <button data-da="pulse">${icon('activity')}<span>${esc(t('nav.pulse'))}</span></button>
         <button data-da="tasks">${icon('kanban')}<span>${esc(t('nav.tasks'))}</span></button>
         <button data-da="calendar">${icon('calendar')}<span>${esc(t('nav.calendar'))}</span></button>
+        ${feat('awards') ? `<button data-da="awards">${icon('award')}<span>${esc(t('nav.awards'))}</span></button>` : ''}
         <button data-da="contacts">${icon('contacts')}<span>${esc(t('side.contacts'))}</span></button>
         <button data-da="calls">${icon('phone')}<span>${esc(t('side.calls'))}</span></button>
         <button data-da="group">${icon('users')}<span>${esc(t('side.new_group'))}</span></button>
@@ -608,6 +663,7 @@ export function openDrawer() {
       case 'pulse': navigate('/pulse'); break;
       case 'tasks': navigate('/tasks'); break;
       case 'calendar': navigate('/calendar'); break;
+      case 'awards': navigate('/awards'); break;
       case 'group': newChatDialog('group'); break;
       case 'channel': newChatDialog('channel'); break;
       case 'catalog': openCatalog(); break;

@@ -56,6 +56,7 @@ function addPeer(call, conn, media) {
 
 function start(conn, { chat_id, media }) {
   const uid = conn.user.id;
+  if (!require('./workspace').on('calls')) return conn.send({ type: 'call:error', code: 'feature_off' });
   const { chat, m } = chats.requireMember(chat_id, uid);
   if (!['direct', 'group', 'channel'].includes(chat.type)) return conn.send({ type: 'call:error', code: 'call_unsupported' });
   if (chat.type === 'channel' && !chats.isChatAdmin(m)) return conn.send({ type: 'call:error', code: 'call_forbidden' });

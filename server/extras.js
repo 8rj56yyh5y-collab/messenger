@@ -9,6 +9,7 @@ const rt = require('./realtime');
 
 // ---------- Отложенные сообщения и напоминания ----------
 function schedule(uid, chatId, b) {
+  require('./workspace').requireFeature('send_later');
   const { chat, m } = chats.requireMember(chatId, uid);
   if (!chats.canPost(chat, m)) throw new HttpError(403, 'Писать сюда нельзя', 'readonly');
   const at = int(b.at);
@@ -227,6 +228,7 @@ function invitePreview(code) {
 }
 
 function register(b, req) {
+  require('./workspace').requireFeature('registration');
   const inv = db.prepare('SELECT * FROM invites WHERE code = ? AND expires_at > ? AND uses_left > 0').get(str(b.code, 40), Date.now());
   if (!inv) throw new HttpError(404, 'Приглашение недействительно', 'invite_invalid');
   const login = validLogin(b.login);

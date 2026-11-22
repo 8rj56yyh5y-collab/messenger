@@ -139,7 +139,7 @@ window.addEventListener('blur', closeMenu);
 window.addEventListener('resize', closeMenu);
 
 // ---------- Уведомления внизу экрана ----------
-export function toast(text, { type = '', action, actionLabel, timeout = 3500 } = {}) {
+export function toast(text, { type = '', action, actionLabel, timeout = 3500, icon: ic = '' } = {}) {
   let host = $('#toasts');
   if (!host) {
     host = document.createElement('div');
@@ -148,7 +148,7 @@ export function toast(text, { type = '', action, actionLabel, timeout = 3500 } =
   }
   const el = document.createElement('div');
   el.className = `toast ${type}`;
-  el.innerHTML = `<span>${esc(text)}</span>${action ? `<button class="link-btn">${esc(actionLabel)}</button>` : ''}`;
+  el.innerHTML = `${ic ? `<span class="toast-ic">${esc(ic)}</span>` : ''}<span>${esc(text)}</span>${action ? `<button class="link-btn">${esc(actionLabel)}</button>` : ''}`;
   if (action) el.querySelector('button').onclick = () => { action(); el.remove(); };
   host.appendChild(el);
   while (host.children.length > 3) host.firstElementChild.remove();

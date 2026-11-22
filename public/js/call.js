@@ -63,7 +63,8 @@ function beep(freq = 520, ms = 160) {
 function deviceConstraints(kind) {
   let id = null;
   try { id = localStorage.getItem(kind === 'audio' ? 'gc-mic' : 'gc-cam'); } catch { /* ignore */ }
-  if (kind === 'audio') return { echoCancellation: true, noiseSuppression: true, autoGainControl: true, ...(id ? { deviceId: { ideal: id } } : {}) };
+  const st = S.settings || {};
+  if (kind === 'audio') return { echoCancellation: st.echoCancel !== false, noiseSuppression: st.noiseSuppression !== false, autoGainControl: st.autoGain !== false, ...(id ? { deviceId: { ideal: id } } : {}) };
   return { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24 }, ...(id ? { deviceId: { ideal: id } } : {}) };
 }
 
@@ -90,8 +91,10 @@ export async function startCall(chatId, media = 'audio') {
   if (!navigator.mediaDevices?.getUserMedia) { toast(t('call.unsupported'), { type: 'error' }); return; }
   const existing = [...S.calls.values()].find((c) => c.chat_id === chatId);
   call = newCallState(chatId, existing ? existing.media : media);
-  call.local = await getLocalMedia(media === 'video');
+  const group = S.chats.get(chatId)?.type !== 'direct';
+  call.local = await getLocalMedia(media === 'video' && !(existing && group && S.settings.callCamOff));
   call.video = call.local.getVideoTracks().length > 0;
+  if (existing && group) applyJoinPrefs();
   render();
   if (existing) socket.send({ type: 'call:join', call_id: existing.id, media });
   else {
@@ -109,10 +112,19 @@ export async function joinCall(callId, media) {
   }
   stopRinging();
   call = newCallState(c.chat_id, media || c.media);
-  call.local = await getLocalMedia(media === 'video');
+  const group = S.chats.get(c.chat_id)?.type !== 'direct';
+  call.local = await getLocalMedia(media === 'video' && !(group && S.settings.callCamOff));
   call.video = call.local.getVideoTracks().length > 0;
+  if (group) applyJoinPrefs();
   render();
   socket.send({ type: 'call:join', call_id: callId, media: media || c.media });
+}
+
+// Вхід у конференцію з вимкненим мікрофоном (налаштування «Дзвінки»)
+function applyJoinPrefs() {
+  if (!S.settings.callMuteOnJoin) return;
+  call.mic = false;
+  call.local.getAudioTracks().forEach((tr) => { tr.enabled = false; });
 }
 
 function newCallState(chatId, media) {

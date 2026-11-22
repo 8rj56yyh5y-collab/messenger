@@ -6,7 +6,6 @@ const { HttpError, str, int, jsonParse } = require('./util');
 const rt = require('./realtime');
 
 const MAX_TEXT = 8000;
-const EDIT_WINDOW_MS = Number(process.env.EDIT_WINDOW_HOURS || 48) * 3600e3;
 const REACTIONS = ['👍', '❤️', '🔥', '😂', '😮', '😢', '🎉', '🙏', '👀', '✅', '👎', '💯'];
 
 // ---------- Пользователи ----------
@@ -410,6 +409,9 @@ function sendMessage(uid, chatId, b) {
   const kind = ['text', 'file', 'image', 'video', 'voice'].includes(b.kind) ? b.kind : 'text';
   const meta = {};
   if (kind === 'video' && b.round) meta.round = true; // видео-кружок
+  const ws = require('./workspace');
+  if (kind === 'voice') ws.requireFeature('voice');
+  if (meta.round) ws.requireFeature('video_notes');
   if (b.ack_required) {
     // «Обязательно к ознакомлению» — только администраторы групп и каналов
     const { chat, m } = requireMember(chatId, uid);
@@ -420,6 +422,7 @@ function sendMessage(uid, chatId, b) {
 }
 
 function sendPoll(uid, chatId, b) {
+  require('./workspace').requireFeature('polls');
   const question = str(b.question, 300);
   const options = (Array.isArray(b.options) ? b.options : []).map((o) => str(o, 120)).filter(Boolean).slice(0, 12);
   if (!question || options.length < 2) throw new HttpError(400, 'Нужен вопрос и минимум два варианта', 'poll_invalid');
@@ -440,7 +443,8 @@ function editMessage(uid, msgId, body) {
   requireMember(m.chat_id, uid);
   if (m.user_id !== uid) throw new HttpError(403, 'Можно править только свои сообщения');
   if (!['text', 'file', 'image', 'video'].includes(m.kind)) throw new HttpError(400, 'Это сообщение нельзя изменить');
-  if (Date.now() - m.created_at > EDIT_WINDOW_MS) throw new HttpError(403, 'Время на правку истекло', 'edit_expired');
+  const editH = require('./workspace').get().edit_window_h;
+  if (editH > 0 && Date.now() - m.created_at > editH * 3600e3) throw new HttpError(403, 'Время на правку истекло', 'edit_expired');
   const text = str(body, MAX_TEXT);
   if (!text && !m.file_id) throw new HttpError(400, 'Пустое сообщение', 'empty');
   const meta = jsonParse(m.meta, {});
@@ -459,6 +463,8 @@ function deleteMessage(uid, msgId) {
   const own = m.user_id === uid;
   if (!own && !isChatAdmin(mem) && chat.type !== 'saved') throw new HttpError(403, 'Нельзя удалить чужое сообщение');
   if (m.kind === 'system' && !isChatAdmin(mem)) throw new HttpError(403, 'Нельзя удалить');
+  const delH = require('./workspace').get().delete_window_h;
+  if (own && !isChatAdmin(mem) && chat.type !== 'saved' && delH > 0 && Date.now() - m.created_at > delH * 3600e3) throw new HttpError(403, 'Час на видалення минув', 'delete_expired');
   tx(() => {
     db.prepare("UPDATE messages SET deleted = 1, body = '', meta = '{}' WHERE id = ?").run(m.id);
     db.prepare('DELETE FROM reactions WHERE message_id = ?').run(m.id);

@@ -1,5 +1,5 @@
 // Открытый чат: шапка, лента сообщений, поле ввода, меню сообщения, выделение, поиск по чату.
-import { S, emit, on, chatTitle, peerOf, isMuted, userName, upsertChat } from './store.js';
+import { S, emit, on, chatTitle, peerOf, isMuted, userName, upsertChat, feat } from './store.js';
 import { t, errText } from './i18n.js';
 import { $, $$, esc, avatar, fmtDay, sameDay, fmtLastSeen, debounce, copyText, plain, isMobile, fmtDateTime } from './util.js';
 import { icon } from './icons.js';
@@ -146,7 +146,7 @@ export function renderHead() {
   $('.head-main', V.el).innerHTML = `${avatar(peer || chat, 42, { kind, online: chat.type === 'direct' && S.online.has(peer?.id) })}
     <div class="head-text"><div class="head-title">${esc(chatTitle(chat, t))}${isMuted(chat) ? icon('bellOff', 14, 'muted-ic') : ''}</div>
     <div class="head-sub">${subtitle(chat)}</div></div>`;
-  const canCall = ['direct', 'group'].includes(chat.type) || (chat.type === 'channel' && ['owner', 'admin'].includes(chat.my_role));
+  const canCall = feat('calls') && (['direct', 'group'].includes(chat.type) || (chat.type === 'channel' && ['owner', 'admin'].includes(chat.my_role)));
   $('.head-actions', V.el).innerHTML = `
     <button class="icon-btn ghost" data-action="search" title="${esc(t('chat.search_in'))}">${icon('search')}</button>
     ${canCall ? `<button class="icon-btn ghost" data-action="call" data-media="audio" title="${esc(chat.type === 'direct' ? t('call.audio') : t('call.start_conf'))}">${icon('phone')}</button>
@@ -500,11 +500,11 @@ export function renderComposer(soft = false) {
     <div class="compose-row">
       <div class="compose-box">
         <button class="icon-btn ghost" data-action="emoji" title="${esc(t('compose.emoji'))}">${icon('smile')}</button>
-        <textarea id="composer-input" rows="1" placeholder="${esc(chat.type === 'channel' ? t('compose.broadcast') : t('compose.placeholder'))}" maxlength="8000">${esc(draft)}</textarea>
+        <textarea id="composer-input" rows="1" spellcheck="${S.settings.spellcheck !== false}" placeholder="${esc(chat.type === 'channel' ? t('compose.broadcast') : t('compose.placeholder'))}" maxlength="8000">${esc(draft)}</textarea>
         ${S.meta.ai ? `<button class="icon-btn ghost" data-action="ai-menu" title="${esc(t('ai.assist'))}">${icon('wand')}</button>` : ''}
         <button class="icon-btn ghost" data-action="attach" title="${esc(t('compose.attach'))}">${icon('clip')}</button>
       </div>
-      <button class="send-btn" data-action="send" aria-label="${esc(t('compose.send'))}">${icon(draft.trim() ? 'send' : 'mic', 22)}</button>
+      <button class="send-btn" data-action="send" aria-label="${esc(t('compose.send'))}">${icon(draft.trim() || !feat('voice') ? 'send' : 'mic', 22)}</button>
     </div>
     <div class="emoji-pop hidden">${emojiPanelHtml()}</div>
     <input type="file" class="hidden" id="file-input" multiple>`;
@@ -546,7 +546,7 @@ function onInput(e) {
   autosize(ta);
   const has = ta.value.trim().length > 0;
   const btn = $('.send-btn', V.el);
-  btn.innerHTML = icon(has || S.editing ? 'send' : 'mic', 22);
+  btn.innerHTML = icon(has || S.editing || !feat('voice') ? 'send' : 'mic', 22);
   if (has && Date.now() - typingSent > 3000) {
     typingSent = Date.now();
     app.socket().send({ type: 'typing', chat_id: V.chatId, action: 'typing' });
@@ -704,7 +704,7 @@ async function sendCurrent(opts = {}) {
     try { await patch(`/api/messages/${m.id}`, { body: text }); } catch (e) { toast(errText(e), { type: 'error' }); }
     return;
   }
-  if (!text) { if (!opts.fromButton) return; startRecording(); return; }
+  if (!text) { if (!opts.fromButton || !feat('voice')) return; startRecording(); return; }
   const reply = S.replyTo;
   S.replyTo = null;
   renderComposeCtx();
@@ -947,7 +947,7 @@ function messageMenu(m, at) {
     canWrite && m.kind !== 'system' && { icon: 'reply', label: t('msg.reply'), onClick: () => startReply(m) },
     m.kind !== 'system' && !m.thread_id && ['group', 'channel', 'direct'].includes(chat.type) && { icon: 'chat', label: t('thread.reply'), onClick: () => app.openPanel({ type: 'thread', id: m.id }) },
     m.kind !== 'system' && canWrite && { icon: 'check', label: t('task.from_msg'), onClick: () => taskDialog({ chatId: chat.id, source: m }) },
-    !mine && m.user_id && m.kind !== 'system' && ['group', 'direct'].includes(chat.type) && { icon: 'star', label: t('kudos.thank'), onClick: () => kudosDialog(chat.id, [m.user_id]) },
+    feat('kudos') && !mine && m.user_id && m.kind !== 'system' && ['group', 'direct'].includes(chat.type) && { icon: 'star', label: t('kudos.thank'), onClick: () => kudosDialog(chat.id, [m.user_id]) },
     editable && { icon: 'edit', label: t('msg.edit'), onClick: () => startEdit(m) },
     m.body && m.kind !== 'poll' && { icon: 'copy', label: t('msg.copy'), onClick: () => copyText(m.body).then(() => toast(t('msg.copied'))) },
     canPin && m.kind !== 'system' && { icon: 'pin', label: chat.pinned_msg_id === m.id ? t('msg.unpin') : t('msg.pin'), onClick: () => post(`/api/chats/${chat.id}/pin`, { message_id: chat.pinned_msg_id === m.id ? null : m.id }).catch((e) => toast(errText(e), { type: 'error' })) },
@@ -1191,7 +1191,7 @@ function chatMenu(anchor) {
     S.meta.ai && chat.type !== 'ai' && { icon: 'sparkles', label: t('ai.summarize'), onClick: () => app.summarizeChat(chat.id) },
     ['group', 'channel', 'direct'].includes(chat.type) && { icon: 'clock', label: t('compose.scheduled_list'), onClick: () => showScheduled() },
     { icon: 'check', label: t('msg.select'), onClick: () => { toast(t('msg.select_hint')); } },
-    chat.type === 'group' && ['owner', 'admin'].includes(chat.my_role) && { icon: 'poll', label: t('poll.new'), onClick: () => pollDialog() },
+    feat('polls') && chat.type === 'group' && ['owner', 'admin'].includes(chat.my_role) && { icon: 'poll', label: t('poll.new'), onClick: () => pollDialog() },
     { icon: 'info', label: t('chat.info'), onClick: () => app.openPanel({ type: 'chat', id: chat.id }) },
     { sep: true },
     chat.type === 'direct' && { icon: 'trash', label: t('chat.delete_direct'), danger: true, onClick: () => app.hideDirect(chat) },
@@ -1298,15 +1298,15 @@ function onClick(e) {
       contextMenu([
         { icon: 'image', label: t('compose.photo_video'), onClick: () => { const fi = $('#file-input'); fi.accept = 'image/*,video/*'; fi.click(); } },
         { icon: 'file', label: t('compose.file'), onClick: () => { const fi = $('#file-input'); fi.accept = ''; fi.click(); } },
-        { icon: 'videoNote', label: t('vnote.record'), onClick: () => recordVideoNote(chat.id) },
+        feat('video_notes') && { icon: 'videoNote', label: t('vnote.record'), onClick: () => recordVideoNote(chat.id) },
         { sep: true },
-        chat.type !== 'ai' && { icon: 'check', label: t('task.new'), onClick: () => taskDialog({ chatId: chat.id }) },
-        ['group', 'direct'].includes(chat.type) && { icon: 'briefcase', label: t('appr.new'), onClick: () => approvalDialog(chat.id) },
-        ['group', 'direct', 'channel'].includes(chat.type) && { icon: 'calendar', label: t('meet.new'), onClick: () => meetingDialog(chat.id) },
-        ['group', 'direct'].includes(chat.type) && { icon: 'star', label: t('kudos.new'), onClick: () => kudosDialog(chat.id) },
-        chat.type !== 'direct' && chat.type !== 'saved' && chat.type !== 'ai' && { icon: 'poll', label: t('poll.new'), onClick: () => pollDialog() },
+        feat('tasks') && chat.type !== 'ai' && { icon: 'check', label: t('task.new'), onClick: () => taskDialog({ chatId: chat.id }) },
+        feat('approvals') && ['group', 'direct'].includes(chat.type) && { icon: 'briefcase', label: t('appr.new'), onClick: () => approvalDialog(chat.id) },
+        feat('meetings') && ['group', 'direct', 'channel'].includes(chat.type) && { icon: 'calendar', label: t('meet.new'), onClick: () => meetingDialog(chat.id) },
+        feat('kudos') && ['group', 'direct'].includes(chat.type) && { icon: 'star', label: t('kudos.new'), onClick: () => kudosDialog(chat.id) },
+        feat('polls') && chat.type !== 'direct' && chat.type !== 'saved' && chat.type !== 'ai' && { icon: 'poll', label: t('poll.new'), onClick: () => pollDialog() },
         { sep: true },
-        { icon: 'clock', label: t('compose.send_later'), onClick: async () => { if (!$('#composer-input').value.trim()) { toast(t('compose.type_first')); return; } const at = await pickDateTime(t('compose.send_later')); if (at) sendCurrent({ at }); } },
+        feat('send_later') && { icon: 'clock', label: t('compose.send_later'), onClick: async () => { if (!$('#composer-input').value.trim()) { toast(t('compose.type_first')); return; } const at = await pickDateTime(t('compose.send_later')); if (at) sendCurrent({ at }); } },
       ], a);
       break;
     case 'ai-menu': aiMenu(a); break;

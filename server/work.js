@@ -5,6 +5,7 @@ const { db, tx, logEvent } = require('./db');
 const { HttpError, str, int, jsonParse } = require('./util');
 const chats = require('./chats');
 const rt = require('./realtime');
+const ws = require('./workspace');
 
 const STATUSES = ['todo', 'doing', 'review', 'done', 'cancelled'];
 const PRIORITIES = ['low', 'normal', 'high', 'urgent'];
@@ -50,6 +51,7 @@ function refreshCard(messageId) {
 
 // ---------- Задачи ----------
 function createTask(uid, b) {
+  ws.requireFeature('tasks');
   const title = str(b.title, 200);
   if (!title) throw new HttpError(400, 'Укажите название задачи', 'title_required');
   const assignee = b.assignee_id ? activeUser(b.assignee_id) : chats.userById(uid);
@@ -103,6 +105,7 @@ function updateTask(uid, id, b) {
   db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`).run(...vals, t.id);
   refreshCard(t.message_id);
   notifyTask(t.id, uid, b.status ? `status:${b.status}` : 'updated');
+  if (b.status === 'done' && t.assignee_id) require('./awards').touch(t.assignee_id);
   return chats.taskView(db.prepare('SELECT * FROM tasks WHERE id = ?').get(t.id));
 }
 
@@ -143,6 +146,7 @@ function listTasks(uid, scope = 'mine') {
 
 // ---------- Погодження ----------
 function createApproval(uid, chatId, b) {
+  ws.requireFeature('approvals');
   const { chat } = chats.requireMember(chatId, uid);
   const title = str(b.title, 200);
   if (!title) throw new HttpError(400, 'Укажите предмет погодження', 'title_required');
@@ -196,11 +200,18 @@ function pendingApprovals(uid) {
 
 // ---------- Подяки ----------
 function giveKudos(uid, chatId, b) {
+  ws.requireFeature('kudos');
   const { chat } = chats.requireMember(chatId, uid);
   const to = [...new Set((Array.isArray(b.to) ? b.to : [b.to]).map(int))].filter((x) => x && x !== uid);
   if (!to.length) throw new HttpError(400, 'Кому подяка?', 'kudos_to');
   to.forEach(activeUser);
-  const badge = BADGES.includes(b.badge) ? b.badge : 'teamwork';
+  const W = ws.get();
+  if (W.kudos_month_limit > 0) {
+    const d = new Date(); const since = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+    const n = db.prepare("SELECT COUNT(*) AS n FROM messages WHERE kind = 'kudos' AND deleted = 0 AND user_id = ? AND created_at >= ?").get(uid, since).n;
+    if (n >= W.kudos_month_limit) throw new HttpError(429, `Ліміт подяк на місяць: ${W.kudos_month_limit}`, 'kudos_limit');
+  }
+  const badge = BADGES.includes(b.badge) || W.custom_badges.some((x) => x.code === b.badge) ? b.badge : 'teamwork';
   const msg = chats.postMessage(uid, chat.id, { kind: 'kudos', body: str(b.text, 1000), meta: { to, badge, mentions: to } });
   emitWork('kudos.given', { from: personRef(uid), to: to.map(personRef), badge, text: msg.body });
   return msg;
@@ -228,6 +239,7 @@ function kudosBoard(uid) {
 
 // ---------- Встречи ----------
 function createMeeting(uid, chatId, b) {
+  ws.requireFeature('meetings');
   const { chat } = chats.requireMember(chatId, uid);
   const title = str(b.title, 200);
   if (!title) throw new HttpError(400, 'Укажите тему встречи', 'title_required');

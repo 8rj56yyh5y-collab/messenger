@@ -15,6 +15,8 @@ const work = require('./work');
 const push = require('./push');
 const outbox = require('./outbox');
 const org = require('./org');
+const ws = require('./workspace');
+const awards = require('./awards');
 const rt = require('./realtime');
 const { acceptUpgrade, Hub } = require('./ws');
 const pkg = require('../package.json');
@@ -57,9 +59,9 @@ function meUser(u) {
 
 // --- Публичные ---
 route('GET', '/api/meta', () => ({
-  name: APP_NAME, version: pkg.version, ai: ai.enabled(), sso: !!process.env.GOBSEK_SSO_SECRET,
+  name: APP_NAME, version: pkg.version, ai: ai.enabled() && ws.on('ai'), ai_available: ai.enabled(), sso: !!process.env.GOBSEK_SSO_SECRET,
   gobsek_url: process.env.GOBSEK_URL || '', sso_start: process.env.GOBSEK_SSO_URL || '', needs_setup: db.prepare('SELECT COUNT(*) AS n FROM users WHERE is_bot = 0').get().n === 0,
-  langs: LANGS, max_upload_mb: files.MAX_MB, reactions: chats.REACTIONS,
+  langs: LANGS, max_upload_mb: Math.min(files.MAX_MB, ws.get().max_upload_mb), reactions: chats.REACTIONS, ws: ws.publicView(),
 }), { public: true });
 
 route('POST', '/api/login', async (req, res) => {
@@ -121,7 +123,10 @@ route('PATCH', '/api/me', async (req, res, p, u) => {
     const cur = chats.userSettings(u);
     const allowed = ['theme', 'accent', 'wallpaper', 'fontSize', 'bubbleRadius', 'sendOnEnter', 'notifications', 'sounds', 'preview',
       'hideLastSeen', 'hideEmail', 'hidePhone', 'compact', 'animations', 'folders', 'quickReactions', 'readReceipts', 'timeFormat',
-      'autoReply', 'templates', 'animatedWallpaper', 'density', 'push'];
+      'autoReply', 'templates', 'animatedWallpaper', 'density', 'push',
+      'font', 'msgLayout', 'bubbleWidth', 'chatWidth', 'groupAvatars', 'chatPreview', 'contrast', 'bigTargets', 'underlineLinks', 'bigEmoji',
+      'quietHours', 'groupNotify', 'notifyTasks', 'notifyApprovals', 'notifyKudos', 'notifyMeetings', 'awardToasts', 'offHoursMute', 'tz',
+      'spellcheck', 'chatSort', 'startPage', 'callMuteOnJoin', 'callCamOff', 'noiseSuppression', 'echoCancel', 'autoGain', 'mirror', 'soundVolume'];
     for (const k of allowed) if (k in b.settings) cur[k] = b.settings[k];
     const json = JSON.stringify(cur);
     if (json.length > 20000) throw new HttpError(400, 'Слишком много настроек');
@@ -163,8 +168,14 @@ route('GET', '/api/users/:id', (req, res, p, u) => {
 });
 
 // --- Оргструктура и профиль ---
+route('GET', '/api/awards', (req, res, p, u) => awards.myAwards(u.id));
+route('GET', '/api/awards/leaderboard', (req, res, p, u, q) => { ws.requireFeature('awards'); return awards.leaderboard(u.id, { period: q.get('period') || 'month', dept: q.get('dept') || '' }); });
+route('GET', '/api/awards/feed', (req, res, p, u) => { ws.requireFeature('awards'); return awards.feed(u.id); });
+route('GET', '/api/users/:id/awards', (req, res, p, u) => { ws.requireFeature('awards'); return awards.summary(int(p.id)); });
 route('GET', '/api/org', (req, res, p, u) => org.orgView(u.id));
 route('GET', '/api/me/profile', (req, res, p, u) => org.profile(u.id, u.id));
+route('GET', '/api/admin/workspace', (req, res, p, u) => { extras.requireAdmin(u); return ws.get(); });
+route('PATCH', '/api/admin/workspace', async (req, res, p, u) => { extras.requireAdmin(u); return ws.update(u, await readJson(req)); });
 route('POST', '/api/admin/departments', async (req, res, p, u) => { extras.requireAdmin(u); return org.createDepartment(u, await readJson(req)); });
 route('PATCH', '/api/admin/departments/:id', async (req, res, p, u) => { extras.requireAdmin(u); return org.updateDepartment(u, p.id, await readJson(req)); });
 route('DELETE', '/api/admin/departments/:id', (req, res, p, u) => { extras.requireAdmin(u); return org.deleteDepartment(u, p.id); });
@@ -272,15 +283,17 @@ route('GET', '/api/calls/history', (req, res, p, u) => calls.history(u.id));
 
 // --- ИИ ---
 route('POST', '/api/ai/summarize', async (req, res, p, u) => {
+  ws.requireFeature('ai');
   const b = await readJson(req);
   return ai.summarize(u, b.chat_id, b.mode);
 });
 route('POST', '/api/ai/translate', async (req, res, p, u) => {
+  ws.requireFeature('ai');
   const b = await readJson(req);
   return ai.translate(u, b.message_id, b.lang);
 });
-route('POST', '/api/ai/compose', async (req, res, p, u) => ai.compose(u, await readJson(req)));
-route('POST', '/api/ai/digest', (req, res, p, u) => ai.digest(u));
+route('POST', '/api/ai/compose', async (req, res, p, u) => ws.requireFeature('ai') ?? ai.compose(u, await readJson(req)));
+route('POST', '/api/ai/digest', (req, res, p, u) => ws.requireFeature('ai') ?? ai.digest(u));
 
 // --- Администратор ---
 route('GET', '/api/admin/users', (req, res, p, u) => { extras.requireAdmin(u); return extras.adminUsers(); });

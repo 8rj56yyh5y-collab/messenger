@@ -6,7 +6,7 @@ import { icon } from './icons.js';
 import { get, post, patch, del } from './api.js';
 import { modal, toast, confirmDialog } from './dialogs.js';
 
-const TABS = [['stats', 'chart'], ['users', 'users'], ['depts', 'briefcase'], ['invites', 'link'], ['integr', 'hook'], ['audit', 'list']];
+const TABS = [['stats', 'chart'], ['company', 'building'], ['users', 'users'], ['depts', 'briefcase'], ['invites', 'link'], ['integr', 'hook'], ['audit', 'list']];
 
 export function openAdmin(tab = 'stats') {
   const m = modal({ title: t('side.admin'), wide: true, content: '' });
@@ -29,6 +29,70 @@ function credentialsBox(login, password) {
 }
 
 const VIEWS = {
+  async company(el, redraw) {
+    const w = await get('/api/admin/workspace');
+    const FEATS = ['ai', 'calls', 'tasks', 'approvals', 'meetings', 'kudos', 'awards', 'polls', 'voice', 'video_notes', 'send_later', 'registration'];
+    const DAYS = [1, 2, 3, 4, 5, 6, 0];
+    const dayName = (d) => new Date(2024, 0, 7 + d).toLocaleDateString(undefined, { weekday: 'short' });
+    const badgeRow = (b = {}) => `<div class="cb-row" data-code="${esc(b.code || '')}"><input class="input cb-emoji" maxlength="8" value="${esc(b.emoji || '🏅')}">
+      <input class="input cb-name" maxlength="40" placeholder="${esc(t('ws.badge_name'))}" value="${esc(b.name || '')}">
+      <input class="input cb-pts" type="number" min="1" max="1000" value="${b.points || 10}" title="${esc(t('ws.points'))}">
+      <button class="icon-btn ghost" data-a="cb-del">${icon('trash', 18)}</button></div>`;
+    el.innerHTML = `<div class="ws-form">
+      <section class="ws-sec"><h3>${icon('building', 18)} ${esc(t('ws.company'))}</h3>
+        <label class="field"><span>${esc(t('ws.company_name'))}</span><input class="input" id="w-company" maxlength="80" value="${esc(w.company)}" placeholder="ТОВ «Гобсек»"></label>
+        <label class="field"><span>${esc(t('ws.welcome'))}</span><textarea class="input" id="w-welcome" rows="2" maxlength="500" placeholder="${esc(t('ws.welcome_ph'))}">${esc(w.welcome)}</textarea></label></section>
+      <section class="ws-sec"><h3>${icon('megaphone', 18)} ${esc(t('ws.announcement'))}</h3>
+        <p class="muted small">${esc(t('ws.announcement_hint'))}</p>
+        <textarea class="input" id="w-ann" rows="2" maxlength="300" placeholder="${esc(t('ws.announcement_ph'))}">${esc(w.announcement.text)}</textarea>
+        <div class="seg" id="w-ann-lvl">${['info', 'warn', 'success'].map((l) => `<button class="${w.announcement.level === l ? 'on' : ''}" data-lvl="${l}">${esc(t(`ws.lvl_${l}`))}</button>`).join('')}</div></section>
+      <section class="ws-sec"><h3>${icon('sliders', 18)} ${esc(t('ws.features'))}</h3>
+        <p class="muted small">${esc(t('ws.features_hint'))}</p>
+        <div class="feat-grid">${FEATS.map((f) => `<label class="feat-tile ${w.features[f] !== false ? 'on' : ''}"><input type="checkbox" data-feat="${f}" ${w.features[f] !== false ? 'checked' : ''}>
+          <b>${esc(t(`ws.f_${f}`))}</b><small>${esc(t(`ws.fh_${f}`))}</small>${f === 'ai' && !S.meta.ai_available ? `<em>${esc(t('ws.ai_no_key'))}</em>` : ''}</label>`).join('')}</div></section>
+      <section class="ws-sec"><h3>${icon('clock', 18)} ${esc(t('ws.rules'))}</h3>
+        <div class="grid-2">
+          <label class="field"><span>${esc(t('ws.edit_window'))}</span><input class="input" type="number" min="0" id="w-edit" value="${w.edit_window_h}"><small class="muted">${esc(t('ws.zero_unlimited'))}</small></label>
+          <label class="field"><span>${esc(t('ws.delete_window'))}</span><input class="input" type="number" min="0" id="w-del" value="${w.delete_window_h}"><small class="muted">${esc(t('ws.zero_unlimited'))}</small></label>
+          <label class="field"><span>${esc(t('ws.max_upload'))}</span><input class="input" type="number" min="1" id="w-up" value="${w.max_upload_mb}"></label>
+          <label class="field"><span>${esc(t('ws.kudos_limit'))}</span><input class="input" type="number" min="0" id="w-klim" value="${w.kudos_month_limit}"><small class="muted">${esc(t('ws.zero_unlimited'))}</small></label>
+        </div></section>
+      <section class="ws-sec"><h3>${icon('calendar', 18)} ${esc(t('ws.work_hours'))}</h3>
+        <p class="muted small">${esc(t('ws.work_hours_hint'))}</p>
+        <div class="row wh-row"><input class="input" type="time" id="w-from" value="${esc(w.work_hours.from)}"> — <input class="input" type="time" id="w-to" value="${esc(w.work_hours.to)}"></div>
+        <div class="day-pick">${DAYS.map((d) => `<button class="${w.work_hours.days.includes(d) ? 'on' : ''}" data-day="${d}">${esc(dayName(d))}</button>`).join('')}</div></section>
+      <section class="ws-sec"><h3>${icon('award', 18)} ${esc(t('ws.awards'))}</h3>
+        <label class="field"><span>${esc(t('ws.kudos_points'))}</span><input class="input" type="number" min="1" id="w-kpts" value="${w.kudos_points}"></label>
+        <div class="sec-title">${esc(t('ws.custom_badges'))}</div><p class="muted small">${esc(t('ws.custom_badges_hint'))}</p>
+        <div id="cb-list">${w.custom_badges.map(badgeRow).join('')}</div>
+        <button class="btn soft sm" data-a="cb-add">${icon('plus', 16)} ${esc(t('ws.badge_add'))}</button></section>
+      <div class="ws-save"><button class="btn" data-a="save">${icon('check', 18)} ${esc(t('common.save'))}</button></div></div>`;
+    el.addEventListener('change', (e) => { const f = e.target.closest('[data-feat]'); if (f) f.closest('.feat-tile').classList.toggle('on', f.checked); });
+    el.onclick = async (e) => {
+      const lvl = e.target.closest('[data-lvl]');
+      if (lvl) { el.querySelectorAll('[data-lvl]').forEach((b) => b.classList.toggle('on', b === lvl)); return; }
+      const day = e.target.closest('[data-day]');
+      if (day) { day.classList.toggle('on'); return; }
+      const a = e.target.closest('[data-a]');
+      if (!a) return;
+      if (a.dataset.a === 'cb-add') { el.querySelector('#cb-list').insertAdjacentHTML('beforeend', badgeRow()); return; }
+      if (a.dataset.a === 'cb-del') { a.closest('.cb-row').remove(); return; }
+      if (a.dataset.a !== 'save') return;
+      const v = (id) => el.querySelector(id).value;
+      const body = {
+        company: v('#w-company'), welcome: v('#w-welcome'),
+        announcement: { text: v('#w-ann'), level: el.querySelector('[data-lvl].on')?.dataset.lvl || 'info' },
+        features: Object.fromEntries([...el.querySelectorAll('[data-feat]')].map((x) => [x.dataset.feat, x.checked])),
+        edit_window_h: Number(v('#w-edit')), delete_window_h: Number(v('#w-del')), max_upload_mb: Number(v('#w-up')),
+        kudos_month_limit: Number(v('#w-klim')), kudos_points: Number(v('#w-kpts')),
+        work_hours: { from: v('#w-from'), to: v('#w-to'), days: [...el.querySelectorAll('[data-day].on')].map((x) => Number(x.dataset.day)) },
+        custom_badges: [...el.querySelectorAll('.cb-row')].map((r) => ({ code: r.dataset.code, emoji: r.querySelector('.cb-emoji').value, name: r.querySelector('.cb-name').value, points: Number(r.querySelector('.cb-pts').value) })),
+      };
+      a.disabled = true;
+      try { await patch('/api/admin/workspace', body); toast(t('common.saved')); redraw(); } catch (err) { toast(errText(err), { type: 'error' }); a.disabled = false; }
+    };
+  },
+
   async depts(el, redraw) {
     const o = await get('/api/org');
     const deps = o.departments.filter((d) => d.id);

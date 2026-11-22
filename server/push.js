@@ -134,6 +134,25 @@ function previewOf(row) {
   return String(row.body || '').replace(/[*_~`|]{1,2}/g, '').slice(0, 180);
 }
 
+// Персональні правила тиші користувача (дублюються на клієнті в app.js → quietNow)
+function inRange(hhmm, from, to) {
+  if (!from || !to || from === to) return false;
+  return from < to ? hhmm >= from && hhmm < to : hhmm >= from || hhmm < to; // через північ: 22:00–08:00
+}
+function userClock(tz, now = new Date()) {
+  try { return now.toLocaleTimeString('en-GB', { timeZone: tz || undefined, hour: '2-digit', minute: '2-digit', hour12: false }); } catch { return now.toTimeString().slice(0, 5); }
+}
+const KIND_PREF = { task: 'notifyTasks', approval: 'notifyApprovals', kudos: 'notifyKudos', meeting: 'notifyMeetings' };
+function suppressed(s, chat, row, meta, now = new Date()) {
+  const k = KIND_PREF[row.kind] || (meta.event === 'meeting_soon' ? 'notifyMeetings' : meta.event === 'task_due' ? 'notifyTasks' : null);
+  if (k && s[k] === false) return true;
+  if (s.groupNotify === 'mentions' && chat.type !== 'direct' && chat.type !== 'saved' && row.kind !== 'system') return true;
+  if (s.groupNotify === 'none' && chat.type !== 'direct' && chat.type !== 'saved' && row.kind !== 'system') return true;
+  if (s.quietHours?.enabled && inRange(userClock(s.tz, now), s.quietHours.from, s.quietHours.to)) return true;
+  if (s.offHoursMute && !require('./workspace').isWorkTime(now)) return true;
+  return false;
+}
+
 rt.on('message', ({ chat, row, type }) => {
   if (type !== 'message:new' || row.silent) return;
   const c = lazyChats();
@@ -151,6 +170,7 @@ rt.on('message', ({ chat, row, type }) => {
     if (u.status === 'dnd' && !mentioned) continue;
     const s = c.userSettings(u);
     if (s.push === false) continue;
+    if (!mentioned && suppressed(s, chat, row, meta)) continue;
     let title = chat.type === 'direct' ? (author?.name || 'Gobsek Chat') : `${chat.title || 'Gobsek Chat'}${author ? ` · ${author.name}` : ''}`;
     if (chat.type === 'saved') title = 'Gobsek Chat';
     const body = s.preview === false ? '💬' : previewOf(row);
@@ -169,4 +189,4 @@ rt.on('call_started', ({ call, chat, caller }) => {
   }
 });
 
-module.exports = { vapid, subscribe, unsubscribe, count, notifyUser, encrypt, sendTo };
+module.exports = { vapid, subscribe, unsubscribe, count, notifyUser, encrypt, sendTo, suppressed, inRange };

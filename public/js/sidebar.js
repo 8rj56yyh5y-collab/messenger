@@ -18,6 +18,7 @@ export function sidebarHtml() {
     </div>
     <div class="side-head"><div class="search-box">${icon('search', 18)}<input id="side-search" placeholder="${esc(t('common.search'))}" autocomplete="off"><kbd class="kbd-hint">Ctrl K</kbd><button class="icon-btn ghost xs hidden" data-sa="search-clear">${icon('x', 16)}</button></div></div>
     <div class="conn-state hidden"></div>
+    <div class="announce hidden"></div>
     <div class="stories"></div>
     <div class="folders" role="tablist"></div>
     <div class="side-body"><div class="chat-list" role="list"></div><div class="search-results hidden"></div></div>
@@ -86,6 +87,7 @@ function sortChats(list) {
   return list.sort((a, b) => {
     if (!!a.pinned_at !== !!b.pinned_at) return a.pinned_at ? -1 : 1;
     if (a.pinned_at && b.pinned_at) return a.pinned_at - b.pinned_at;
+    if (S.settings.chatSort === 'unread' && !!a.unread !== !!b.unread) return a.unread ? -1 : 1;
     const ta = Math.max(a.last?.created_at || a.updated_at || 0, a.draft ? a.updated_at : 0);
     const tb = Math.max(b.last?.created_at || b.updated_at || 0, b.draft ? b.updated_at : 0);
     return tb - ta;
@@ -120,7 +122,7 @@ function rowHtml(c) {
   const mention = c.mentions > 0 ? `<span class="ubadge at">@</span>` : '';
   const callNow = [...S.calls.values()].some((x) => x.chat_id === c.id);
   const typeIc = c.type === 'channel' ? icon('megaphone', 14, 'type-ic') : c.type === 'group' ? icon('users', 14, 'type-ic') : '';
-  return `<div class="chat-row ${c.id === S.current ? 'on' : ''}" data-chat="${c.id}" role="listitem" tabindex="0">
+  return `<div class="chat-row ${c.id === S.current ? 'on' : ''}" data-chat="${c.id}" role="listitem" tabindex="0" title="${esc(chatTitle(c, t))}">
     ${avatar(peer || c, 52, { kind, online })}
     <div class="cr-main">
       <div class="cr-top"><span class="cr-title">${typeIc}${esc(chatTitle(c, t))}${peer?.is_bot && c.type !== 'ai' ? ' <span class="bot-badge">bot</span>' : ''}${muted ? icon('bellOff', 13, 'muted-ic') : ''}</span>
@@ -135,6 +137,18 @@ function renderStories() {
   const people = [...S.online].map((id) => S.users.get(id)).filter((u) => u && u.id !== S.me.id && !u.is_bot).slice(0, 20);
   el.classList.toggle('hidden', !people.length || S.folder !== 'all');
   el.innerHTML = people.map((u) => `<button class="story" data-user="${u.id}" title="${esc(u.name)}">${avatar(u, 48, { online: true })}<span>${esc(u.name.split(' ')[0])}</span></button>`).join('');
+}
+
+export function renderAnnounce() {
+  const el = $('#sidebar .announce');
+  if (!el) return;
+  const a = S.meta.ws?.announcement;
+  let hidden = '';
+  try { hidden = localStorage.getItem('gc-announce-hide') || ''; } catch { /* ignore */ }
+  if (!a?.text || String(a.id) === hidden) { el.classList.add('hidden'); return; }
+  el.className = `announce lvl-${a.level || 'info'}`;
+  el.innerHTML = `${icon(a.level === 'warn' ? 'alert' : a.level === 'success' ? 'check2' : 'megaphone', 18)}<div class="grow"><b>${esc(S.meta.ws.company || t('ws.announcement'))}</b><span>${esc(a.text)}</span></div>
+    <button class="icon-btn ghost xs" data-sa="announce-hide" aria-label="${esc(t('common.close'))}">${icon('x', 16)}</button>`;
 }
 
 export function renderList() {
@@ -254,6 +268,7 @@ function onClick(e) {
       case 'new': newMenu(sa); break;
       case 'contacts': app.openContacts(); break;
       case 'search-clear': clearSearch(); break;
+      case 'announce-hide': try { localStorage.setItem('gc-announce-hide', String(S.meta.ws?.announcement?.id || '')); } catch { /* ignore */ } renderAnnounce(); break;
       default:
     }
     return;

@@ -1,5 +1,5 @@
 // Разделы навигационной рельсы: Пульс компании, Задачи, Календарь, Звонки, Люди.
-import { S, on, emit, chatTitle, userName } from './store.js';
+import { S, on, emit, chatTitle, userName, feat } from './store.js';
 import { t, errText, getLang } from './i18n.js';
 import { $, esc, avatar, fmtTime, fmtDateTime, fmtDuration, md, fmtLastSeen, isMobile } from './util.js';
 import { icon } from './icons.js';
@@ -8,7 +8,7 @@ import { toast, modal } from './dialogs.js';
 import { previewText } from './messages.js';
 import { startCall } from './call.js';
 import {
-  taskDialog, setTaskStatus, meetingDialog, rsvp, kudosDialog, decideApproval, ackMessage, BADGES, PRIORITY_COLORS, TASK_STATUSES, fmtMoney, minutesDialog,
+  taskDialog, setTaskStatus, meetingDialog, rsvp, kudosDialog, decideApproval, ackMessage, badgeEmoji, badgeName, allBadgeCodes, PRIORITY_COLORS, TASK_STATUSES, fmtMoney, minutesDialog,
 } from './work-ui.js';
 import * as app from './app.js';
 
@@ -88,8 +88,8 @@ const RENDER = {
         ${card(esc(t('pulse.meetings')), p.meetings.length ? `<div class="mlist">${p.meetings.map(meetingRow).join('')}</div>` : empty(t('pulse.meet_empty'), 'calendar'), { ic: 'calendar', action: `<button class="link-btn" data-pg="new-meeting">+ ${esc(t('meet.short'))}</button>` })}
         ${card(esc(t('pulse.birthdays')), p.birthdays.length ? `<div class="bday-list">${p.birthdays.map((b) => `<div class="bday ${b.in_days === 0 ? 'today' : ''}">${avatar(b.user, 44)}<div><b>${esc(b.user.name)}</b><span>${esc(b.in_days === 0 ? t('pulse.bday_today') : t('pulse.bday_in', { n: b.in_days }))}</span></div>
           <button class="btn sm ${b.in_days === 0 ? '' : 'soft'}" data-pg="congrats" data-uid="${b.user.id}">🎂 ${esc(t('pulse.congrats'))}</button></div>`).join('')}</div>` : empty(t('pulse.bday_empty'), 'smile'), { ic: 'cake' })}
-        ${card(esc(t('pulse.kudos')), `${p.kudos.top.length ? `<div class="leader">${p.kudos.top.slice(0, 5).map((k, i) => `<div class="lrow"><span class="lpos p${i + 1}">${i + 1}</span>${avatar(k.user, 34)}<div class="lr-main"><b>${esc(k.user.name)}</b><span>${Object.entries(k.badges).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([bd, n]) => `${BADGES[bd] || ''}${n > 1 ? `×${n}` : ''}`).join(' ')}</span></div><b class="lcount">${k.count}</b></div>`).join('')}</div>` : empty(t('pulse.kudos_empty'), 'star')}`,
-          { ic: 'trophy', action: `<button class="link-btn" data-pg="kudos">+ ${esc(t('kudos.thank'))}</button>` })}
+        ${card(esc(t('pulse.kudos')), `${p.kudos.top.length ? `<div class="leader">${p.kudos.top.slice(0, 5).map((k, i) => `<div class="lrow"><span class="lpos p${i + 1}">${i + 1}</span>${avatar(k.user, 34)}<div class="lr-main"><b>${esc(k.user.name)}</b><span>${Object.entries(k.badges).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([bd, n]) => `${badgeEmoji(bd)}${n > 1 ? `×${n}` : ''}`).join(' ')}</span></div><b class="lcount">${k.count}</b></div>`).join('')}</div>` : empty(t('pulse.kudos_empty'), 'star')}`,
+          { ic: 'trophy', action: `${feat('awards') ? `<button class="link-btn" data-pg="nav" data-to="awards">${esc(t('nav.awards'))}</button>` : ''}${feat('kudos') ? `<button class="link-btn" data-pg="kudos">+ ${esc(t('kudos.thank'))}</button>` : ''}` })}
         ${card(esc(t('pulse.newcomers')), p.newcomers.length ? `<div class="people-row">${p.newcomers.map((u) => `<button class="person-tile" data-pg="user" data-uid="${u.id}">${avatar(u, 52)}<b>${esc(u.name.split(' ')[0])}</b><span>${esc(u.position || u.department || '')}</span></button>`).join('')}</div>` : empty(t('pulse.newcomers_empty'), 'users'), { ic: 'users' })}
         ${card(esc(t('pulse.online')), p.online.length ? `<div class="online-row">${p.online.map((u) => `<button class="story" data-pg="dm" data-uid="${u.id}" title="${esc(u.name)}">${avatar(u, 50, { online: true })}<span>${esc(u.name.split(' ')[0])}</span></button>`).join('')}</div>` : empty(t('pulse.online_empty'), 'eye'), { ic: 'eye', cls: 'span-2' })}
       </div>`;
@@ -225,9 +225,9 @@ RENDER.me = async function me() {
   const person = (id) => S.users.get(id) || (id === S.me.id ? S.me : { id, name: userName(id) });
   const mgr = p.manager ? person(p.manager) : null;
   const statuses = ['available', 'busy', 'dnd', 'away', 'remote', 'vacation'];
-  const allBadges = Object.keys(BADGES);
+  const allBadges = allBadgeCodes();
   const tiles = [
-    ['saved', 'bookmark', t('chat.saved')], ['ai', 'sparkles', 'Gobsek AI'], ['people', 'users', t('nav.people')], ['calls', 'phone', t('nav.calls')],
+    ...(feat('awards') ? [['awards', 'award', t('nav.awards')]] : []), ['saved', 'bookmark', t('chat.saved')], ...(S.meta.ai ? [['ai', 'sparkles', 'Gobsek AI']] : []), ['people', 'users', t('nav.people')], ['calls', 'phone', t('nav.calls')],
     ['settings', 'settings', t('side.settings')], ['help', 'help', t('side.help')], ...(u.role === 'admin' ? [['admin', 'shield', t('side.admin')]] : []), ['logout', 'logout', t('side.logout')],
   ];
   inner().innerHTML = `<div class="me-hero">
@@ -238,6 +238,8 @@ RENDER.me = async function me() {
           ${u.status_text ? `<div class="me-status-text">💬 ${esc(u.status_text)}</div>` : ''}</div>
         <button class="btn soft" data-pg="me-edit">${icon('edit', 16)} ${esc(t('me.edit'))}</button>
       </div>
+      ${p.awards ? `<button class="me-level" data-pg="nav" data-to="awards"><span class="ml-badge">${p.awards.level}</span><div class="grow"><b>${esc(t(`aw.t_${p.awards.title}`))} · ${p.awards.xp} XP</b>
+        <div class="aw-bar"><i style="width:${Math.round(((p.awards.xp - p.awards.prev_xp) / Math.max(1, p.awards.next_xp - p.awards.prev_xp)) * 100)}%"></i></div></div>${icon('right', 18)}</button>` : ''}
       <div class="me-statuses">${statuses.map((st) => `<button class="st-chip ${u.status === st ? 'on' : ''}" data-pg="me-status" data-st="${st}"><i class="st-dot st-${st}"></i>${esc(t(`status.${st}`))}</button>`).join('')}</div>
     </div>
     <div class="stat-strip me-stats">
@@ -256,9 +258,68 @@ RENDER.me = async function me() {
         ${p.reports.length ? `<div class="om-team"><span class="muted small">${esc(t('me.team', { n: p.reports.length }))}</span><div class="avs">${p.reports.slice(0, 12).map((id) => `<button data-pg="user" data-uid="${id}" title="${esc(person(id).name)}">${avatar(person(id), 34, { online: S.online.has(id) })}</button>`).join('')}</div></div>` : ''}
         ${!p.department && !mgr && !p.reports.length ? empty(t('me.no_org'), 'info') : ''}
         <span class="muted small">${esc(t('me.since', { date: new Date(p.member_since).toLocaleDateString(getLang(), { day: 'numeric', month: 'long', year: 'numeric' }) }))}</span></div>`, { ic: 'users' })}
-      ${card(esc(t('me.badges')), `<div class="badge-wall">${allBadges.map((b) => `<div class="bw ${p.kudos.badges[b] ? 'got' : ''}" title="${esc(t(`badge.${b}`))}"><span>${BADGES[b]}</span><small>${esc(t(`badge.${b}`))}</small>${p.kudos.badges[b] ? `<i>${p.kudos.badges[b]}</i>` : ''}</div>`).join('')}</div>
-        ${p.kudos.last.length ? `<div class="kd-last">${p.kudos.last.map((k) => `<div class="kd-l">${BADGES[k.badge] || '🎉'}<div><b>${esc(userName(k.from))}</b><span>${esc(k.text || t(`badge.${k.badge}`))}</span></div></div>`).join('')}</div>` : ''}`, { ic: 'trophy' })}
+      ${card(esc(t('me.badges')), `<div class="badge-wall">${allBadges.map((b) => `<div class="bw ${p.kudos.badges[b] ? 'got' : ''}" title="${esc(badgeName(b))}"><span>${badgeEmoji(b)}</span><small>${esc(badgeName(b))}</small>${p.kudos.badges[b] ? `<i>${p.kudos.badges[b]}</i>` : ''}</div>`).join('')}</div>
+        ${p.kudos.last.length ? `<div class="kd-last">${p.kudos.last.map((k) => `<div class="kd-l">${badgeEmoji(k.badge)}<div><b>${esc(userName(k.from))}</b><span>${esc(k.text || badgeName(k.badge))}</span></div></div>`).join('')}</div>` : ''}`, { ic: 'trophy' })}
       ${card(esc(t('me.quick')), `<div class="me-tiles">${tiles.map(([k, ic, label]) => `<button class="me-tile ${k === 'logout' ? 'danger' : ''}" data-pg="me-go" data-go="${k}">${icon(ic, 22)}<span>${esc(label)}</span></button>`).join('')}</div>`, { ic: 'grid', cls: 'span-2' })}
+    </div>`;
+};
+
+// ---------- Нагороди: рівень, досягнення, рейтинг, стрічка визнання ----------
+const TIER_CLS = ['none', 'bronze', 'silver', 'gold'];
+RENDER.awards = async function awards() {
+  const period = S.awPeriod || 'month';
+  const scope = S.awScope || 'company';
+  let me; let board; let feed;
+  try {
+    [me, board, feed] = await Promise.all([get('/api/awards'), get(`/api/awards/leaderboard?period=${period}${scope === 'dept' && S.me.department ? `&dept=${encodeURIComponent(S.me.department)}` : ''}`), get('/api/awards/feed')]);
+  } catch (e) { inner().innerHTML = `${head(esc(t('nav.awards')))}<p class="muted center">${esc(errText(e))}</p>`; return; }
+  if (current !== 'awards') return;
+  const pct = Math.round(((me.xp - me.prev_xp) / Math.max(1, me.next_xp - me.prev_xp)) * 100);
+  const got = me.achievements.filter((a) => a.tier > 0).length;
+  const person = (id) => S.users.get(id) || (id === S.me.id ? S.me : { id, name: userName(id) });
+  const when = (ts) => { const d = Date.now() - ts; return d < 3600e3 ? t('aw.min_ago', { n: Math.max(1, Math.round(d / 60e3)) }) : d < 86400e3 ? fmtTime(ts) : new Date(ts).toLocaleDateString(getLang(), { day: 'numeric', month: 'short' }); };
+  inner().innerHTML = `${head(esc(t('nav.awards')), esc(t('aw.sub')), `<button class="btn hl-btn-wide" data-pg="aw-thank">${icon('gift', 18)}<span>${esc(t('aw.thank'))}</span></button>`)}
+    <div class="aw-hero">
+      <div class="aw-ring" style="--p:${pct}"><div><b>${me.level}</b><span>${esc(t('aw.level'))}</span></div></div>
+      <div class="aw-hero-main">
+        <div class="aw-title">${esc(t(`aw.t_${me.title}`))}</div>
+        <div class="aw-xp"><b>${me.xp}</b> XP <span class="muted">· ${esc(t('aw.to_next', { n: me.next_xp - me.xp }))}</span></div>
+        <div class="aw-bar"><i style="width:${pct}%"></i></div>
+        <div class="aw-chips">
+          <span class="aw-chip">${icon('flame', 15)} ${esc(t('aw.month_xp', { n: me.month_xp }))}</span>
+          ${me.rank ? `<span class="aw-chip gold">${icon('crown', 15)} ${esc(t('aw.rank', { n: me.rank, of: me.of }))}</span>` : ''}
+          <span class="aw-chip">${icon('medal', 15)} ${esc(t('aw.got', { n: got, of: me.achievements.length }))}</span>
+        </div>
+      </div>
+    </div>
+    <div class="aw-grid">
+      <div class="aw-col">
+        ${card(esc(t('aw.achievements')), `<div class="ach-grid">${me.achievements.map((a) => {
+          const next = a.next ?? a.tiers[a.tiers.length - 1];
+          const prev = a.tier ? a.tiers[a.tier - 1] : 0;
+          const p = a.next == null ? 100 : Math.round(((a.value - prev) / Math.max(1, next - prev)) * 100);
+          return `<div class="ach t-${TIER_CLS[a.tier]}" title="${esc(t(`ach.${a.code}_d`))}">
+            <div class="ach-ic"><span>${a.emoji}</span></div>
+            <div class="ach-main"><b>${esc(t(`ach.${a.code}`))}</b><small>${esc(t(`ach.${a.code}_d`))}</small>
+              <div class="ach-prog"><i style="width:${Math.max(0, Math.min(100, p))}%"></i></div>
+              <span class="ach-num">${a.next == null ? esc(t('aw.maxed')) : `${a.value} / ${next}`}</span></div>
+            <div class="ach-tiers">${[1, 2, 3].map((x) => `<i class="${a.tier >= x ? TIER_CLS[x] : ''}"></i>`).join('')}</div></div>`;
+        }).join('')}</div>`, { ic: 'medal' })}
+        ${card(esc(t('me.badges')), `<div class="badge-wall">${allBadgeCodes().map((b) => `<div class="bw ${me.badges[b] ? 'got' : ''}" title="${esc(badgeName(b))}"><span>${badgeEmoji(b)}</span><small>${esc(badgeName(b))}</small>${me.badges[b] ? `<i>${me.badges[b]}</i>` : ''}</div>`).join('')}</div>`, { ic: 'trophy' })}
+      </div>
+      <div class="aw-col">
+        ${card(esc(t('aw.leaderboard')), `<div class="seg full sm">${['week', 'month', 'all'].map((x) => `<button class="${period === x ? 'on' : ''}" data-pg="aw-period" data-v="${x}">${esc(t(`aw.p_${x}`))}</button>`).join('')}</div>
+          ${S.me.department ? `<div class="seg full sm">${['company', 'dept'].map((x) => `<button class="${scope === x ? 'on' : ''}" data-pg="aw-scope" data-v="${x}">${esc(x === 'dept' ? S.me.department : t('aw.s_company'))}</button>`).join('')}</div>` : ''}
+          <div class="lb">${board.length ? board.slice(0, 15).map((r, i) => `<div class="lb-row ${r.user.id === S.me.id ? 'me' : ''} ${i < 3 ? `top p${i + 1}` : ''}" data-pg="user" data-uid="${r.user.id}">
+            <span class="lb-pos">${i < 3 ? ['🥇', '🥈', '🥉'][i] : i + 1}</span>${avatar(r.user, 36, { online: S.online.has(r.user.id) })}
+            <div class="lb-main"><b>${esc(r.user.name)}</b><span>${esc(r.user.department || r.user.position || '')}${r.kudos ? ` · 🎉 ${r.kudos}` : ''}${r.tasks ? ` · ✅ ${r.tasks}` : ''}</span></div>
+            <span class="lb-lvl">${esc(t('aw.lvl_short', { n: r.level }))}</span><b class="lb-xp">${r.xp}</b></div>`).join('') : empty(t('aw.lb_empty'), 'trophy')}</div>`, { ic: 'crown' })}
+        ${card(esc(t('aw.feed')), `<div class="aw-feed">${feed.length ? feed.slice(0, 20).map((f) => f.type === 'kudos'
+          ? `<div class="af-row" data-pg="open-chat" data-chat="${f.chat_id}"><span class="af-ic">${badgeEmoji(f.badge)}</span><div><b>${esc(person(f.from).name.split(' ')[0])}</b> → <b>${esc(f.to.map((id) => person(id).name.split(' ')[0]).join(', '))}</b>
+              <span class="muted">· ${esc(badgeName(f.badge))}</span>${f.text ? `<p>${esc(f.text)}</p>` : ''}<small>${esc(when(f.at))}</small></div></div>`
+          : `<div class="af-row"><span class="af-ic t-${TIER_CLS[f.tier]}">${f.emoji || '🏅'}</span><div>${esc(t('aw.unlocked', { name: person(f.user_id).name.split(' ')[0], ach: t(`ach.${f.code}`), tier: t(`aw.tier_${f.tier}`) }))}<small>${esc(when(f.at))}</small></div></div>`).join('') : empty(t('pulse.kudos_empty'), 'star')}</div>`, { ic: 'activity' })}
+        <div class="aw-how"><b>${icon('info', 16)} ${esc(t('aw.how'))}</b><p>${esc(t('aw.how_text'))}</p></div>
+      </div>
     </div>`;
 };
 
@@ -465,6 +526,9 @@ async function onClick(e) {
     case 'ttab': S.taskTab = a.dataset.st; RENDER.tasks(); break;
     case 'task-next': e.stopPropagation(); await setTaskStatus(Number(a.dataset.tid), a.dataset.st); RENDER.tasks(); break;
     case 'calday': S.calDay = a.dataset.day; RENDER.calendar(); break;
+    case 'aw-period': S.awPeriod = a.dataset.v; RENDER.awards(); break;
+    case 'aw-scope': S.awScope = a.dataset.v; RENDER.awards(); break;
+    case 'aw-thank': kudosDialog(null); break;
     case 'me-status': setMyStatus(a.dataset.st); break;
     case 'me-edit': case 'me-photo': app.openSettingsSection('profile'); break;
     case 'me-go': app.profileGo(a.dataset.go); break;
@@ -476,10 +540,12 @@ async function onClick(e) {
 on('tasks:changed', () => { if (current === 'tasks' || current === 'pulse') RENDER[current](); });
 on('meetings:changed', () => { if (current === 'calendar' || current === 'pulse') RENDER[current](); });
 on('presence', () => { if (current === 'people') RENDER.people(); });
+on('kudos:sent', () => { if (current === 'awards') setTimeout(() => RENDER.awards(), 1800); });
 on('ws', (msg) => {
   if (msg.type === 'task:update' && (current === 'tasks' || current === 'pulse')) RENDER[current]();
   if (msg.type === 'approval:done' && current === 'pulse') RENDER.pulse();
   if (msg.type === 'user:update' && current === 'me' && msg.user.id === S.me.id) RENDER.me();
+  if (msg.type === 'award' && current === 'awards') RENDER.awards();
 });
 // Поворот телефона / изменение ширины — перерисовать раздел под новый макет
 let lastMobile = isMobile();

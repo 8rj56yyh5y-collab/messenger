@@ -4,7 +4,7 @@ import { t, locale } from './i18n.js';
 import { esc, md, avatar, fmtTime, fmtSize, fmtDuration, isEmojiOnly, nameColor, plain, sameDay } from './util.js';
 import { icon } from './icons.js';
 import { voiceHtml } from './voice.js';
-import { BADGES, PRIORITY_COLORS, fmtMoney } from './work-ui.js';
+import { badgeEmoji, badgeName, allBadgeCodes, PRIORITY_COLORS, fmtMoney } from './work-ui.js';
 
 const GROUP_GAP = 5 * 60e3;
 
@@ -27,7 +27,7 @@ export function previewText(m, { withAuthor = false, chat = null } = {}) {
     case 'call': s = callLabel(m); break;
     case 'task': s = `✅ ${t('task.task')}: ${m.task?.title || m.body}`; break;
     case 'approval': s = `🧾 ${t('appr.short')}: ${m.meta?.title || m.body}`; break;
-    case 'kudos': s = `${BADGES[m.meta?.badge] || '🎉'} ${t('kudos.short')}: ${(m.meta?.to || []).map((id) => userName(id).split(' ')[0]).join(', ')}`; break;
+    case 'kudos': s = `${badgeEmoji(m.meta?.badge)} ${t('kudos.short')}: ${(m.meta?.to || []).map((id) => userName(id).split(' ')[0]).join(', ')}`; break;
     case 'meeting': s = `📅 ${t('meet.short')}: ${m.meeting?.title || m.body}`; break;
     case 'system': return systemText(m);
     default:
@@ -278,8 +278,8 @@ function approvalCardHtml(m) {
 function kudosCardHtml(m) {
   const k = m.meta || {};
   return `<div class="wcard kudos-card badge-${k.badge}">
-    <div class="kd-emoji">${BADGES[k.badge] || '🎉'}</div>
-    <div class="kd-badge">${esc(t(`badge.${k.badge}`))}</div>
+    <div class="kd-emoji">${badgeEmoji(k.badge)}</div>
+    <div class="kd-badge">${esc(badgeName(k.badge))}</div>
     <div class="kd-to">${(k.to || []).map((id) => personChip(id)).join('')}</div>
     ${m.body ? `<div class="kd-text">${md(m.body)}</div>` : ''}
     <div class="kd-from">${esc(m.user_id === S.me.id ? t('kudos.from_you') : t('kudos.from', { name: userName(m.user_id) }))}</div>

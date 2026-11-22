@@ -181,7 +181,7 @@ button.stat:hover { transform: translateY(-2px); }
   /* Плавающая панель вкладок */
   .rail { left: 10px; right: 10px; bottom: calc(8px + env(safe-area-inset-bottom)); height: 64px; padding: 6px; border-radius: 24px; border: 1px solid var(--island-line);
     box-shadow: 0 14px 40px -12px rgba(15, 23, 42, .35); }
-  .rail .rail-item[data-nav="calls"], .rail .rail-item[data-nav="people"] { display: none; }
+  .rail .rail-item[data-nav="calls"], .rail .rail-item[data-nav="people"], .rail .rail-item[data-nav="awards"] { display: none; }
   .rail .rail-item[data-nav="me"] { display: flex; }
   .rail-item { border-radius: 18px; font-size: 10px; }
   .rail-item.on { background: var(--grad); color: #fff; box-shadow: 0 8px 18px -8px color-mix(in srgb, var(--accent) 70%, transparent); }

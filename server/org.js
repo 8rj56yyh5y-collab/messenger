@@ -155,6 +155,7 @@ function profile(uid, viewerId) {
     kudos: { total: kudos.length, month: kudos.filter((k) => k.created_at > since).length, badges,
       last: kudos.slice(-3).reverse().map((k) => ({ from: k.user_id, text: k.body, badge: jsonParse(k.meta, {}).badge, at: k.created_at })) },
     member_since: u.created_at,
+    awards: require('./workspace').on('awards') ? (({ level, title, xp, prev_xp, next_xp }) => ({ level, title, xp, prev_xp, next_xp }))(require('./awards').summary(u.id)) : null,
   };
   if (uid === viewerId) {
     out.tasks = {

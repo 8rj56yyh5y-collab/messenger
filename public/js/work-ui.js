@@ -10,6 +10,10 @@ import { modal, toast, promptDialog } from './dialogs.js';
 export const BADGES = {
   teamwork: '🤝', idea: '💡', help: '🛟', speed: '⚡', quality: '💎', leader: '🏆', client: '🎯', mentor: '🧭',
 };
+const customBadges = () => S.meta?.ws?.custom_badges || [];
+export const badgeEmoji = (c) => BADGES[c] || customBadges().find((x) => x.code === c)?.emoji || '🎉';
+export const badgeName = (c) => (BADGES[c] ? t(`badge.${c}`) : customBadges().find((x) => x.code === c)?.name || t('badge.teamwork'));
+export const allBadgeCodes = () => [...Object.keys(BADGES), ...customBadges().map((x) => x.code)];
 export const PRIORITY_COLORS = { low: '#8b95a1', normal: '#3390ec', high: '#f29900', urgent: '#e53935' };
 export const TASK_STATUSES = ['todo', 'doing', 'review', 'done'];
 
@@ -40,9 +44,16 @@ async function membersOf(chatId) {
 }
 
 function peoplePicker(list, selected, { multi = true, name = 'p' } = {}) {
-  return `<div class="people-pick">${list.map((u) => `<label class="pp-item"><input type="${multi ? 'checkbox' : 'radio'}" name="${name}" value="${u.id}" ${selected.includes(u.id) ? 'checked' : ''}>
+  const q = list.length > 8 ? `<input class="input pp-q" placeholder="${esc(t('common.search'))}" autocomplete="off">` : '';
+  return `${q}<div class="people-pick">${list.map((u) => `<label class="pp-item"><input type="${multi ? 'checkbox' : 'radio'}" name="${name}" value="${u.id}" ${selected.includes(u.id) ? 'checked' : ''}>
     ${avatar(u, 30)}<span>${esc(u.id === S.me.id ? `${u.name} (${t('msg.you_obj')})` : u.name)}</span></label>`).join('')}</div>`;
 }
+// Пошук у довгому списку людей (кириличний регістр — через toLocaleLowerCase)
+document.addEventListener('input', (e) => {
+  if (!e.target.classList?.contains('pp-q')) return;
+  const q = e.target.value.trim().toLocaleLowerCase();
+  e.target.nextElementSibling?.querySelectorAll('.pp-item').forEach((l) => { l.hidden = !!q && !l.textContent.toLocaleLowerCase().includes(q); });
+});
 const picked = (root, name) => [...root.querySelectorAll(`input[name="${name}"]:checked`)].map((x) => Number(x.value));
 
 // ---------- Задача ----------
@@ -180,11 +191,14 @@ export async function rsvp(id, answer) {
 
 // ---------- Подяка ----------
 export async function kudosDialog(chatId, preselect = []) {
-  const people = (await membersOf(chatId)).filter((u) => u.id !== S.me.id);
+  // Без чату (зі сторінки «Нагороди»): всі колеги + вибір, де опублікувати подяку
+  const people = (chatId ? await membersOf(chatId) : [...S.users.values()].filter((u) => !u.is_bot && u.active !== false)).filter((u) => u.id !== S.me.id);
+  const groups = chatId ? [] : [...S.chats.values()].filter((c) => c.type === 'group' && !c.archived).sort((a, b) => (b.last_message?.created_at || 0) - (a.last_message?.created_at || 0));
   const m = modal({
     title: t('kudos.new'),
     content: `<div class="field"><span>${esc(t('kudos.to'))}</span>${peoplePicker(people, preselect, { name: 'kd-to' })}</div>
-      <div class="field"><span>${esc(t('kudos.badge'))}</span><div class="badge-pick">${Object.entries(BADGES).map(([k, e], i) => `<button class="badge-opt ${i === 0 ? 'on' : ''}" data-badge="${k}"><span>${e}</span><small>${esc(t(`badge.${k}`))}</small></button>`).join('')}</div></div>
+      ${chatId ? '' : `<label class="field"><span>${esc(t('kudos.where'))}</span><select class="input" id="kd-chat"><option value="dm">${esc(t('kudos.where_dm'))}</option>${groups.map((c) => `<option value="${c.id}">${esc(chatTitle(c, t))}</option>`).join('')}</select></label>`}
+      <div class="field"><span>${esc(t('kudos.badge'))}</span><div class="badge-pick">${allBadgeCodes().map((k, i) => `<button class="badge-opt ${i === 0 ? 'on' : ''}" data-badge="${k}"><span>${badgeEmoji(k)}</span><small>${esc(badgeName(k))}</small></button>`).join('')}</div></div>
       <label class="field"><span>${esc(t('kudos.text'))}</span><textarea class="input" id="kd-text" rows="3" maxlength="1000" placeholder="${esc(t('kudos.text_ph'))}"></textarea></label>
       <div class="modal-actions"><button class="btn soft" data-a="no">${esc(t('common.cancel'))}</button><button class="btn" data-a="yes">${esc(t('kudos.send'))} 🎉</button></div>`,
   });
@@ -194,7 +208,17 @@ export async function kudosDialog(chatId, preselect = []) {
   b.querySelector('[data-a=no]').onclick = () => m.close();
   b.querySelector('[data-a=yes]').onclick = async () => {
     try {
-      await post(`/api/chats/${chatId}/kudos`, { to: picked(b, 'kd-to'), badge, text: b.querySelector('#kd-text').value });
+      const to = picked(b, 'kd-to');
+      let cid = chatId;
+      if (!cid) {
+        const where = b.querySelector('#kd-chat').value;
+        if (where === 'dm') {
+          if (to.length !== 1) { toast(t('kudos.dm_one')); return; }
+          cid = (await post('/api/chats/direct', { user_id: to[0] })).id;
+        } else cid = Number(where);
+      }
+      await post(`/api/chats/${cid}/kudos`, { to, badge, text: b.querySelector('#kd-text').value });
+      emit('kudos:sent');
       m.close();
       confetti();
     } catch (e) { toast(errText(e), { type: 'error' }); }

@@ -9,13 +9,14 @@ const { HttpError, int, jsonParse } = require('./util');
 const chats = require('./chats');
 
 const MAX_MB = Number(process.env.MAX_UPLOAD_MB) || 100;
+const maxMb = () => Math.min(MAX_MB, require('./workspace').get().max_upload_mb || MAX_MB);
 // Встраивать в страницу можно только безопасные типы; остальное — скачиванием.
 const INLINE = /^(image\/(png|jpeg|gif|webp|avif)|audio\/[\w.+-]+|video\/[\w.+-]+|application\/pdf)$/;
 
 function upload(req, user) {
   return new Promise((resolve, reject) => {
     const len = int(req.headers['content-length']);
-    if (len > MAX_MB * 1024 * 1024) return reject(new HttpError(413, `Файл больше ${MAX_MB} МБ`, 'too_big'));
+    if (len > maxMb() * 1024 * 1024) return reject(new HttpError(413, `Файл больше ${maxMb()} МБ`, 'too_big'));
     let name = 'file';
     try { name = decodeURIComponent(String(req.headers['x-file-name'] || 'file')); } catch { /* оставим file */ }
     name = name.replace(/[\\/\0\r\n]/g, '_').slice(0, 200) || 'file';
@@ -32,12 +33,12 @@ function upload(req, user) {
     let failed = false;
     req.on('data', (c) => {
       size += c.length;
-      if (size > MAX_MB * 1024 * 1024 && !failed) {
+      if (size > maxMb() * 1024 * 1024 && !failed) {
         failed = true;
         out.destroy();
         fs.rm(full, { force: true }, () => {});
         req.destroy();
-        reject(new HttpError(413, `Файл больше ${MAX_MB} МБ`, 'too_big'));
+        reject(new HttpError(413, `Файл больше ${maxMb()} МБ`, 'too_big'));
       }
     });
     req.pipe(out);

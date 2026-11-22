@@ -9,7 +9,7 @@ import { startCall } from './call.js';
 import { previewText } from './messages.js';
 import * as app from './app.js';
 import { renderThread, closeThread } from './thread.js';
-import { BADGES } from './work-ui.js';
+import { badgeEmoji, badgeName } from './work-ui.js';
 
 let P = null; // { type, id, chatId, tab }
 
@@ -100,7 +100,7 @@ function orgHtml(u) {
     ${o.department ? `<div class="om-row">${icon('briefcase', 18)}<div><b>${esc(o.department.name)}</b><span>${o.department.cfo ? `<span class="cfo-chip">${esc(o.department.cfo)}</span>` : esc(t('profile.department'))}</span></div></div>` : ''}
     ${mgr ? `<div class="om-row" data-pa="member-user" data-uid="${mgr.id}">${avatar(mgr, 34)}<div><b>${esc(mgr.name)}</b><span>${esc(t('me.manager'))}</span></div></div>` : ''}
     ${o.reports.length ? `<div class="om-team"><span class="muted small">${esc(t('me.team', { n: o.reports.length }))}</span><div class="avs">${o.reports.slice(0, 10).map((id) => `<button data-pa="member-user" data-uid="${id}" title="${esc(person(id).name)}">${avatar(person(id), 30)}</button>`).join('')}</div></div>` : ''}
-    ${got.length ? `<div class="mini-badges">${got.map(([b, n]) => `<span title="${esc(t(`badge.${b}`))}">${BADGES[b] || '🎉'}${n > 1 ? `<i>${n}</i>` : ''}</span>`).join('')}</div>` : ''}
+    ${got.length ? `<div class="mini-badges">${got.map(([b, n]) => `<span title="${esc(badgeName(b))}">${badgeEmoji(b)}${n > 1 ? `<i>${n}</i>` : ''}</span>`).join('')}</div>` : ''}
   </div>`;
 }
 

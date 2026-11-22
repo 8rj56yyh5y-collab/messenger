@@ -60,3 +60,6 @@ export function userName(id) {
   if (id === S.me?.id) return S.me.name;
   return S.users.get(id)?.name || '…';
 }
+
+// Чи ввімкнена функція в налаштуваннях компанії (адмін може вимкнути)
+export const feat = (name) => S.meta?.ws?.features?.[name] !== false;
